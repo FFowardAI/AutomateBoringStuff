@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Automate Boring Stuff",
+  "version": "0.0.1",
+  "description": "Make your life less boring",
+  "action": {
+    "default_popup": "dist/index.html"
+  },
+  "permissions": []
+}

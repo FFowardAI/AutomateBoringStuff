@@ -1,0 +1,173 @@
+html, body {
+  width: 400px;
+  height: 400px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden; /* Optional: prevent scrollbars if content overflows */
+  font-family: 'Inter', sans-serif;
+}
+
+#root {
+  height: 100%;
+  width: 100%;
+}
+
+.app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont,
+                 "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    /* Faint pastel purple gradient */
+    background: linear-gradient(180deg, #f9f7ff, #f5f5fc);
+    padding-top: 1rem; /* Add padding to push content down */
+  }
+  
+  /* App Title (formerly header) */
+  .app__header {
+    padding-left: 1rem; /* Align with body content potentially */
+    margin-bottom: 1.5rem; /* Space below title */
+    font-size: 1.1rem; /* Smaller font size */
+    font-weight: 600; /* Keep bold */
+    color: #4e54c8; /* Darker color for visibility */
+    /* Removed background, box-shadow, text-align */
+  }
+  
+  /* Centered body */
+  .app__body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+  }
+  
+  .app__message {
+    font-size: 1rem;
+    color: #333;
+    text-align: center;
+    margin-bottom: 2rem;
+    line-height: 1.5;
+    font-family: 'Instrument Serif', serif;
+  }
+  
+  /* Refactored Button Styles */
+  .button {
+    font-size: 0.95rem; /* Updated */
+    font-weight: 600; /* Kept */
+    padding: 0.6rem 1.8rem; /* Updated */
+    border-radius: 9999px; /* Updated */
+    cursor: pointer;
+    border: none; /* Base buttons have no border */
+    transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+    margin-top: 1rem; /* Keep default margin */
+  }
+  
+  .button:hover {
+    transform: translateY(-2px);
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 8px rgba(255, 105, 135, 0.3);
+  }
+  
+  .button:active {
+    transform: translateY(0);
+    box-shadow: none;
+  }
+  
+  /* Primary Button (Original Record Button Style) */
+  .button--primary {
+    background: linear-gradient(90deg, #ff9a8b, #ff6a88, #ff99ac);
+    color: #fff;
+  }
+  
+  .button--primary:hover {
+    /* Inherits base hover */
+  }
+  
+  /* Secondary Button (Original Cancel Button Style) */
+  .button--secondary {
+    background: transparent;
+    color: #6c757d; /* Gray text color */
+    border: 1px solid #6c757d; /* Gray outline */
+    font-weight: normal; /* Override base bold font */
+  }
+
+  .button--secondary:hover {
+    background: transparent;
+    color: #495057; /* Darker gray text on hover */
+    border-color: #ced4da; /* Slightly lighter gray border on hover */
+    /* Inherits base hover transform/shadow */
+  }
+
+/* Roadmap styles */
+.roadmap {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 2rem 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start; /* Align items to the start */
+}
+
+.roadmap__item {
+  position: relative;
+  padding-left: 15px; /* Reduced space for the smaller dot */
+  margin-bottom: 1rem; /* Space between items */
+  font-size: 1rem;
+  color: #333;
+  line-height: 1.5;
+  min-height: 18px; /* Adjust based on dot size */
+  display: flex;
+  align-items: center;
+  font-family: 'Fira Code', monospace; /* Apply Instrument Serif font */
+}
+
+.roadmap__item::before {
+  content: ''; /* Empty content for a dot */
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6px; /* Way smaller dot width */
+  height: 6px; /* Way smaller dot height */
+  background-color: #a8b5f0; /* Pastel blue/lavender color */
+  border-radius: 50%;
+}
+
+/* Recording Dot */
+.recording-dot {
+  width: 20px;
+  height: 20px;
+  background-color: red;
+  border-radius: 50%;
+  /* Add red box-shadow for glow effect */
+  box-shadow: 0 0 10px 3px rgba(255, 0, 0, 0.6);
+}
+
+.recording-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between; /* Distribute items vertically */
+  height: 100%; /* Take full height of parent */
+}
+
+.recording-text {
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+  color: #6c757d; /* Gray color */
+}
+
+/* Button Group Container */
+.button-group {
+  display: flex;
+  gap: 1rem; /* Space between buttons */
+  margin-top: 1.5rem; /* Keep margin from dot */
+}
+
+/* Ensure buttons in group don't have top margin */
+.button-group .button {
+  margin-top: 0;
+}
