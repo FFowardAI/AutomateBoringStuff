@@ -55,7 +55,7 @@ deno --version
      - `SUPABASE_URL`: Found in your Supabase project's API settings.
      - `SUPABASE_ANON_KEY`: Found in your Supabase project's API settings (public anon key).
      - `SUPABASE_SERVICE_ROLE_KEY`: (Optional, but recommended for backend operations) Found in your Supabase project's API settings (service_role secret). Using the service role key bypasses Row Level Security (RLS), which might be necessary for certain backend tasks. Ensure RLS is properly configured if you choose to use the anon key for all operations.
-   - Set the desired `PORT` (default is 8001).
+   - Set the desired `PORT` (default is 8002).
 
 4. Cache dependencies:
    ```
@@ -71,7 +71,7 @@ deno --version
    deno task dev
    ```
 
-The server will run on the specified port (e.g., `http://localhost:8001`).
+The server will run on the specified port (e.g., `http://localhost:8002`).
 
 ## Architecture Overview
 

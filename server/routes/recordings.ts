@@ -194,7 +194,7 @@ router.post("/:id/finalize", async (ctx: RouterContext) => {
         }
 
         // Check if we need to upload images
-        let uploadedImages = [];
+        let uploadedImages: any[] = [];
 
         if (ctx.request.hasBody) {
             const contentType = ctx.request.headers.get("content-type") || "";
@@ -253,7 +253,7 @@ router.post("/:id/finalize", async (ctx: RouterContext) => {
         }
 
         // Now call the VLM analyze endpoint
-        const analyzeUrl = `${Deno.env.get("SERVER_URL") || 'http://localhost:8001'}/api/vlm/analyze`;
+        const analyzeUrl = `${Deno.env.get("SERVER_URL") || 'http://localhost:8002'}/api/vlm/analyze`;
         const analyzeResponse = await fetch(analyzeUrl, {
             method: "POST",
             headers: {

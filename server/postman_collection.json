@@ -288,49 +288,6 @@
                     "response": []
                 },
                 {
-                    "name": "End Recording",
-                    "request": {
-                        "method": "PUT",
-                        "header": [
-                            {
-                                "key": "Content-Type",
-                                "value": "application/json",
-                                "type": "text"
-                            }
-                        ],
-                        "body": {
-                            "mode": "raw",
-                            "raw": "{\n    \"end_time\": \"2024-01-01T10:05:00Z\"\n}",
-                            "options": {
-                                "raw": {
-                                    "language": "json"
-                                }
-                            }
-                        },
-                        "url": {
-                            "raw": "{{baseUrl}}/api/recordings/:id/end",
-                            "host": [
-                                "{{baseUrl}}"
-                            ],
-                            "path": [
-                                "api",
-                                "recordings",
-                                ":id",
-                                "end"
-                            ],
-                            "variable": [
-                                {
-                                    "key": "id",
-                                    "value": "<recording_uuid>",
-                                    "description": "UUID of the recording to end"
-                                }
-                            ]
-                        },
-                        "description": "Ends a recording by setting the end_time. If no end_time is provided, the current time is used."
-                    },
-                    "response": []
-                },
-                {
                     "name": "Finalize Recording & Generate Script",
                     "request": {
                         "method": "POST",
@@ -377,7 +334,7 @@
                                 }
                             ]
                         },
-                        "description": "Finalizes a recording, optionally uploads images, and generates a script via the VLM service. Can be called with or without images."
+                        "description": "Finalizes a recording, optionally uploads images, and generates a script via the VLM service. Can be called with or without images. Sets the end_time for the recording if not already set."
                     },
                     "response": []
                 }
@@ -985,6 +942,41 @@
                         "description": "Analyzes all images from a recording and generates an automation script. The script is saved to the database and linked to the session. This endpoint gets all chronologically ordered images for the recording, analyzes them with Claude, and creates a detailed step-by-step script to reproduce the workflow."
                     },
                     "response": []
+                },
+                {
+                    "name": "Batch Analyze Images",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json",
+                                "type": "text"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"recording_id\": \"<recording_uuid>\",\n    \"prompt\": \"Describe what is happening in this image\",\n    \"limit\": 5\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}/api/vlm/batch-analyze",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "api",
+                                "vlm",
+                                "batch-analyze"
+                            ]
+                        },
+                        "description": "Analyzes multiple images from a recording individually. Processes up to 'limit' most recent images (default 5) with the specified prompt. Useful for getting information about each image separately rather than a full workflow automation script."
+                    },
+                    "response": []
                 }
             ]
         }
@@ -1012,7 +1004,7 @@
     "variable": [
         {
             "key": "baseUrl",
-            "value": "http://localhost:8001",
+            "value": "http://localhost:8002",
             "type": "string",
             "description": "Base URL for the AutomateBoringStuff server"
         }

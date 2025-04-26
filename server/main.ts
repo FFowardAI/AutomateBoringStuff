@@ -24,7 +24,7 @@ import vlmRoutes from "./routes/vlm.ts";
 
 // Parse command line arguments
 const args = parse(Deno.args);
-const port = parseInt(args.port as string || env.PORT || "8001");
+const port = parseInt(args.port as string || env.PORT || "8002");
 
 // Initialize the application
 const app = new Application();
