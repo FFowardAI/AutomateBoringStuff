@@ -10,8 +10,14 @@
     "activeTab",
     "desktopCapture",
     "tabs",
-    "scripting"
+    "scripting",
+    "tabs",
+    "desktopCapture",
+    "activeTab"
   ],
+  "background": {
+    "service_worker": "dist/src/background.js"
+  },
   "web_accessible_resources": [
     {
       "resources": ["/images/*"],

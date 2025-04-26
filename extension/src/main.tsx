@@ -1,85 +1,135 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react'
+import React, { useState, useCallback, useEffect } from 'react'
 import ReactDOM from 'react-dom/client'
 import { AnimatePresence, motion } from 'framer-motion'
 import './main.css'
 import { EmptyView } from './components/EmptyView'
 import { RecordingView } from './components/RecordingView'
-// PermissionGuideView is likely not needed for captureVisibleTab
-// import { PermissionGuideView } from './components/PermissionGuideView'
+// Removed unused PermissionGuideView and error message state
 
-type ViewState = 'empty' | 'recording' | 'error'; // Simplified states
+// Define expected state structure from background
+interface BackgroundState {
+  isRecording: boolean;
+  screenshots: string[];
+}
+
+type ViewState = 'loading' | 'empty' | 'recording' | 'error'; // Added loading state
 
 const App: React.FC = () => {
-  const [viewState, setViewState] = useState<ViewState>("empty");
+  // State now reflects the background script's state
+  const [viewState, setViewState] = useState<ViewState>('loading'); 
   const [screenshots, setScreenshots] = useState<string[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const intervalRef = useRef<number | null>(null); // Use number for setInterval ID in browser
+  // Removed intervalRef and local state management logic
 
-  // Function to clean up interval
-  const cleanupCapture = useCallback(() => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
+  // --- Communication with Background Script --- 
+
+  // Function to request state update from background
+  const fetchStateFromBackground = useCallback(() => {
+    chrome.runtime.sendMessage({ type: "get_state" }, (response: BackgroundState | { error: string }) => {
+      if (chrome.runtime.lastError) {
+        console.error("Error fetching state:", chrome.runtime.lastError.message);
+        setErrorMessage(`Error connecting to background: ${chrome.runtime.lastError.message}`);
+        setViewState('error');
+        return;
+      }
+      if (response && 'error' in response) {
+          console.error("Error received from background:", response.error);
+          setErrorMessage(`Background error: ${response.error}`);
+          setViewState('error');
+      } else if (response) {
+        console.log("Received state from background:", response);
+        setScreenshots(response.screenshots || []);
+        setViewState(response.isRecording ? 'recording' : 'empty');
+      } else {
+         // Handle unexpected response (e.g., background script not ready)
+         console.warn("Received empty response from background script.");
+         setErrorMessage("Background script did not respond correctly.");
+         setViewState('error');
+      }
+    });
   }, []);
 
-  // Function to start capturing screenshots from the active tab
-  const startRecording = useCallback(() => {
-    cleanupCapture(); // Clean up any previous interval
-    setScreenshots([]); // Clear previous screenshots
-    setErrorMessage(null); // Clear previous errors
-    setViewState('recording'); // Move to recording view
+  // Effect to fetch initial state and listen for updates
+  useEffect(() => {
+    // Fetch initial state when popup opens
+    fetchStateFromBackground();
 
-    if (chrome.tabs?.captureVisibleTab) {
-      // Start capturing immediately and then set an interval
-      const captureFrame = () => {
-        chrome.tabs.captureVisibleTab(
-          // Use the current window. Passing null/undefined uses the current window.
-          // Specify options like format and quality if needed.
-          { format: 'png' }, 
-          (dataUrl) => {
-            if (chrome.runtime.lastError) {
-              console.error('Error capturing tab:', chrome.runtime.lastError.message);
-              setErrorMessage(`Error capturing tab: ${chrome.runtime.lastError.message}`);
-              setViewState('error'); // Go to an error state
-              cleanupCapture(); // Stop trying
-              return;
-            }
-            if (dataUrl) {
-              setScreenshots((prev) => [...prev, dataUrl]);
-            }
-          }
-        );
-      };
+    // Listener for updates pushed from background
+    const messageListener = (message: any, sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
+      if (message.type === "state_update") {
+        console.log("Popup received state update:", message.payload);
+        const newState: BackgroundState = message.payload;
+        setScreenshots(newState.screenshots || []);
+        // Only change view state if it differs, avoid unnecessary re-renders
+        setViewState(currentState => {
+            const nextViewState = newState.isRecording ? 'recording' : 'empty';
+            return currentState === nextViewState ? currentState : nextViewState;
+        });
+      }
+    };
 
-      captureFrame(); // Capture the first frame immediately
-      intervalRef.current = window.setInterval(captureFrame, 500); // Capture every 500ms
+    chrome.runtime.onMessage.addListener(messageListener);
 
-    } else {
-      console.error('chrome.tabs.captureVisibleTab API not available.');
-      setErrorMessage('Tab Capture API is not available. Ensure your extension has permissions and is running in a valid context.');
-      setViewState('error');
-    }
-  }, [cleanupCapture]);
+    // Cleanup listener when popup closes
+    return () => {
+      chrome.runtime.onMessage.removeListener(messageListener);
+      console.log("Popup closed, listener removed.");
+    };
+  }, [fetchStateFromBackground]); // Dependency array includes the memoized fetch function
+
+  // --- Event Handlers --- 
+
+  const handleRecordClick = () => {
+    console.log("Sending start_recording message...");
+    // Ask background to start
+    chrome.runtime.sendMessage({ type: "start_recording" }, (response) => {
+       if (chrome.runtime.lastError || (response && response.error)) {
+         console.error("Error starting recording:", chrome.runtime.lastError?.message || response?.error);
+         setErrorMessage(`Failed to start: ${chrome.runtime.lastError?.message || response?.error}`);
+         setViewState('error');
+       } else {
+         // State update will come via the listener, can optionally update immediately
+         console.log("Start recording request acknowledged.");
+         // setViewState('recording'); // Optional immediate feedback
+       }
+    });
+  };
 
   const handleCancelClick = () => {
-    cleanupCapture();
+    console.log("Sending stop_recording message (Cancel)...");
+    // Ask background to stop
+    chrome.runtime.sendMessage({ type: "stop_recording" }, (response) => {
+        if (chrome.runtime.lastError || (response && response.error)) {
+          console.error("Error stopping recording (cancel):", chrome.runtime.lastError?.message || response?.error);
+          // Even if stopping fails, try to go back to empty view
+          setErrorMessage(`Failed to stop cleanly: ${chrome.runtime.lastError?.message || response?.error}`);
+          setViewState('empty'); 
+        } else {
+          // State update listener will set view to 'empty'
+          console.log("Stop recording request acknowledged (Cancel).");
+        }
+    });
+    // Immediately try to set view state for responsiveness, listener will correct if needed
     setViewState('empty');
   };
 
   const handleDoneClick = () => {
-    console.log(`Recording finished with ${screenshots.length} screenshots.`);
-    // TODO: Process/save screenshots
-    cleanupCapture();
+    console.log("Sending stop_recording message (Done)...");
+    // Ask background to stop and process
+    chrome.runtime.sendMessage({ type: "stop_recording" }, (response: BackgroundState | {error: string}) => {
+        if (chrome.runtime.lastError || (response && 'error' in response)) {
+          console.error("Error stopping recording (done):", chrome.runtime.lastError?.message || (response as {error: string}).error);
+          setErrorMessage(`Failed to stop cleanly: ${chrome.runtime.lastError?.message || (response as {error: string}).error}`);
+          // Go back to empty view even if there was an error stopping
+          setViewState('empty');
+        } else if (response) {
+          console.log(`Recording finished with ${response.screenshots?.length || 0} screenshots.`);
+          // Background script handles saving/processing. Listener will set state to empty.
+        }
+    });
+     // Immediately try to set view state for responsiveness
     setViewState('empty');
   };
-
-  // Clean up interval on component unmount
-  useEffect(() => {
-    return () => {
-      cleanupCapture();
-    };
-  }, [cleanupCapture]);
 
   return (
     <div className="app">
@@ -88,25 +138,32 @@ const App: React.FC = () => {
       </header>
       <div className="app__body">
         <AnimatePresence mode="wait">
-          {viewState === 'empty' && (
-            <EmptyView onRandomViewClick={() => {}} key="empty" onRecordClick={startRecording} />
+          {viewState === 'loading' && (
+             <motion.div key="loading" initial={{opacity: 0}} animate={{opacity: 1}} exit={{opacity: 0}} style={{textAlign: 'center'}}>
+                Loading state...
+             </motion.div>
           )}
-          {/* Removed PermissionGuideView and 'permissionNeeded' state */}
+          {viewState === 'empty' && (
+            <EmptyView key="empty" onRecordClick={handleRecordClick} />
+          )}
           {viewState === 'recording' && (
              <RecordingView
               key="recording"
-              screenshots={screenshots} // Pass screenshots directly
+              screenshots={screenshots} // Pass screenshots received from background
               onCancelClick={handleCancelClick}
-              onDoneClick={() => handleDoneClick()} // Pass collected screenshots on Done
+              onDoneClick={handleDoneClick} // Done now just sends stop message
             />
           )}
-          {/* Removed 'capturing' state */}
            {viewState === 'error' && (
              <motion.div key="error" initial={{opacity: 0}} animate={{opacity: 1}} exit={{opacity: 0}} style={{textAlign: 'center', color: 'red'}}>
-                <p>Could not start recording:</p>
+                <p>An error occurred:</p>
                 <p>{errorMessage || 'An unknown error occurred.'}</p>
-                <button className="button button--secondary" onClick={() => setViewState('empty')} style={{marginTop: '1rem'}}>
-                    Close
+                <button 
+                    className="button button--secondary" 
+                    onClick={fetchStateFromBackground} // Add a retry button
+                    style={{marginTop: '1rem'}}
+                >
+                    Retry Connection
                 </button>
              </motion.div>
            )}
