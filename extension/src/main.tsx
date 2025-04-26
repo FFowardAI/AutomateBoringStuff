@@ -19,6 +19,7 @@ const App: React.FC = () => {
   const [viewState, setViewState] = useState<ViewState>('loading'); 
   const [screenshots, setScreenshots] = useState<string[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [items, setItems] = useState<string[]>([]);
   // Removed intervalRef and local state management logic
 
   // --- Communication with Background Script --- 
@@ -46,6 +47,44 @@ const App: React.FC = () => {
          setErrorMessage("Background script did not respond correctly.");
          setViewState('error');
       }
+    });
+  }, []);
+
+  const handleConsume = useCallback(() => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs: any[]) => {
+      const tabId = tabs[0]?.id as number;
+      if (!tabId) return;
+
+      chrome.scripting.executeScript({
+        target: { tabId, allFrames: false },
+        world: "MAIN",
+        func: () => {
+          const selector = [
+            "a[href]",
+            "button",
+            'input[type="button"]',
+            'input[type="submit"]',
+            '[role="button"]',
+            "[onclick]",
+          ].join(",");
+          const elems = Array.from(
+            document.querySelectorAll<HTMLElement>(selector)
+          );
+          if (!elems.length) {
+            console.warn("No clickable elements found");
+            return;
+          }
+          const rnd = elems[Math.floor(Math.random() * elems.length)];
+          const evt = new MouseEvent("click", {
+            bubbles: true,
+            cancelable: true,
+          });
+          rnd.dispatchEvent(evt);
+          console.log(
+            `⚡ clicked random <${rnd.tagName.toLowerCase()}#${rnd.id}>`
+          );
+        },
+      });
     });
   }, []);
 
@@ -144,7 +183,7 @@ const App: React.FC = () => {
              </motion.div>
           )}
           {viewState === 'empty' && (
-            <EmptyView key="empty" onRecordClick={handleRecordClick} />
+            <EmptyView key="empty" onRecordClick={handleRecordClick} onRandomViewClick={handleConsume} />
           )}
           {viewState === 'recording' && (
              <RecordingView
