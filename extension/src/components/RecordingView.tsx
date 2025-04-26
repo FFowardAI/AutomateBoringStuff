@@ -12,43 +12,6 @@ export const RecordingView: React.FC<RecordingViewProps> = ({
   onCancelClick, 
   onDoneClick 
 }) => {
-  // Remove internal screenshots state and canvas ref as they are no longer needed
-  // const [screenshots, setScreenshots] = useState<string[]>([]) 
-  // const canvasRef = useRef<HTMLCanvasElement>(null)
-
-  // Remove useEffect hook that captured frames from videoElement
-  /*
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !videoElement) return;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const interval = setInterval(() => {
-       // Ensure video dimensions are available
-       if (videoElement.readyState < videoElement.HAVE_METADATA || videoElement.videoWidth === 0) {
-         return; // Skip if video not ready or dimensions unknown
-       }
-       
-      canvas.width = videoElement.videoWidth;
-      canvas.height = videoElement.videoHeight;
-      try {
-        ctx.drawImage(videoElement, 0, 0);
-        const dataUrl = canvas.toDataURL('image/png');
-        setScreenshots((prev) => [...prev, dataUrl]);
-      } catch (error) {
-        console.error("Error drawing video frame to canvas:", error);
-        // Optionally stop recording or handle error
-      }
-    }, 500); // Keep interval at 500ms as rate limit was for API call
-
-    return () => {
-      clearInterval(interval);
-    }
-    // Depend on videoElement presence
-  }, [videoElement]); 
-  */
 
   const handleDone = () => {
     // Simply call onDoneClick, main.tsx already has the screenshots
