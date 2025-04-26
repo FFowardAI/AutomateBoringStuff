@@ -2,20 +2,22 @@ import React, { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 
 interface RecordingViewProps {
-  videoElement: HTMLVideoElement; // Receive the playing video element
+  screenshots: string[]; // Receive screenshots directly
   onCancelClick: () => void
-  onDoneClick: (screenshots: string[]) => void
+  onDoneClick: () => void // Changed: No longer passes screenshots back, as main.tsx already has them
 }
 
 export const RecordingView: React.FC<RecordingViewProps> = ({ 
-  videoElement, 
+  screenshots, // Use the passed screenshots
   onCancelClick, 
   onDoneClick 
 }) => {
-  const [screenshots, setScreenshots] = useState<string[]>([])
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+  // Remove internal screenshots state and canvas ref as they are no longer needed
+  // const [screenshots, setScreenshots] = useState<string[]>([]) 
+  // const canvasRef = useRef<HTMLCanvasElement>(null)
 
-  // Effect to capture frames from the passed videoElement
+  // Remove useEffect hook that captured frames from videoElement
+  /*
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !videoElement) return;
@@ -46,9 +48,11 @@ export const RecordingView: React.FC<RecordingViewProps> = ({
     }
     // Depend on videoElement presence
   }, [videoElement]); 
+  */
 
   const handleDone = () => {
-    onDoneClick(screenshots)
+    // Simply call onDoneClick, main.tsx already has the screenshots
+    onDoneClick();
   }
 
   return (
@@ -60,12 +64,12 @@ export const RecordingView: React.FC<RecordingViewProps> = ({
       exit={{ opacity: 0 }}
       transition={{ duration: 0.3 }}
     >
-      {/* hidden canvas for snapshots */}
-      <canvas ref={canvasRef} style={{ display: 'none' }} />
+      {/* Remove hidden canvas */}
+      {/* <canvas ref={canvasRef} style={{ display: 'none' }} /> */}
 
       <p className="recording-text">Recording...</p>
 
-      {/* screenshot previews */}
+      {/* screenshot previews - directly use the prop */}
       <div className="screenshot-previews">
         {screenshots.map((src, i) => (
           <img
