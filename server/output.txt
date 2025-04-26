@@ -1,0 +1,1091 @@
+FILE: routes/compute_jobs.ts
+import { Router, Context } from "oak";
+import { supabase } from "../db/supabaseClient.ts";
+import { ComputeJob, ComputeJobStatus } from "../db/models.ts";
+
+const router = new Router();
+
+// GET /api/compute_jobs - List jobs (potentially filtered)
+router.get("/", async (ctx: Context) => {
+    // TODO: Add filtering (by script_id, status) and security (admin only?)
+    const { data, error } = await supabase
+        .from('compute_jobs')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+    if (error) {
+        ctx.response.status = 500;
+        ctx.response.body = { error: "Failed to fetch compute jobs", message: error.message };
+        return;
+    }
+    ctx.response.body = data;
+});
+
+// GET /api/compute_jobs/:id - Get status of a specific job
+router.get("/:id", async (ctx: Context) => {
+    const { id } = ctx.params;
+    if (!id) {
+        ctx.response.status = 400;
+        ctx.response.body = { error: "Compute Job ID is required" };
+        return;
+    }
+
+    // TODO: Security check: Does user own the script related to this job? Or admin?
+    const { data, error } = await supabase
+        .from('compute_jobs')
+        .select(`
+            id, status, result, context, created_at, updated_at,
+            script:scripts(id, session_id)
+        `)
+        .eq('id', id)
+        .single();
+
+    if (error || !data) {
+        ctx.response.status = error?.code === 'PGRST116' ? 404 : 500;
+        ctx.response.body = { error: error?.code === 'PGRST116' ? "Compute job not found" : "Failed to fetch compute job", message: error?.message };
+        return;
+    }
+
+    ctx.response.body = data;
+});
+
+// PUT /api/compute_jobs/:id - Update job status and result (called by compute service)
+router.put("/:id", async (ctx: Context) => {
+    const { id } = ctx.params;
+    if (!id) {
+        ctx.response.status = 400;
+        ctx.response.body = { error: "Compute Job ID is required" };
+        return;
+    }
+
+    try {
+        // TODO: Secure this endpoint - should only be callable by the trusted compute service
+        const body = await ctx.request.body.json();
+        const { status, result } = body as Partial<ComputeJob>;
+
+        // Validation
+        if (!status) {
+            ctx.response.status = 400;
+            ctx.response.body = { error: "Status field is required for update" };
+            return;
+        }
+        if (!['queued', 'running', 'completed', 'failed'].includes(status)) {
+            ctx.response.status = 400;
+            ctx.response.body = { error: "Invalid status provided" };
+            return;
+        }
+
+        const updateData: Partial<ComputeJob> & { updated_at: string } = {
+            status,
+            updated_at: new Date().toISOString(),
+        };
+        if (result !== undefined) {
+            updateData.result = result;
+        }
+
+        const { data: updatedJob, error } = await supabase
+            .from('compute_jobs')
+            .update(updateData)
+            .eq('id', id)
+            .select('id, script_id, status') // Select fields needed for notification
+            .single();
+
+        if (error || !updatedJob) {
+            ctx.response.status = error?.code === 'PGRST116' ? 404 : 500;
+            ctx.response.body = { error: error?.code === 'PGRST116' ? "Compute job not found to update" : "Failed to update compute job", message: error?.message };
+            return;
+        }
+
+        // --- Trigger Notification on Completion/Failure --- 
+        if (status === 'completed' || status === 'failed') {
+            // 1. Find the user associated with the script
+            const { data: scriptData, error: scriptError } = await supabase
+                .from('scripts')
+                .select('session:sessions(user_id)')
+                .eq('id', updatedJob.script_id)
+                .single();
+
+            if (scriptError || !scriptData?.session?.user_id) {
+                console.error(`Failed to find user for script ${updatedJob.script_id} to send notification for job ${id}:`, scriptError);
+            } else {
+                const userId = scriptData.session.user_id;
+                const notificationType = status === 'completed' ? 'compute_done' : 'error';
+                const message = status === 'completed'
+                    ? `Your script execution has completed.`
+                    : `Your script execution failed.`;
+
+                // 2. Create notification
+                const { error: notificationError } = await supabase
+                    .from('notifications')
+                    .insert([{
+                        user_id: userId,
+                        compute_job_id: id,
+                        script_id: updatedJob.script_id,
+                        type: notificationType,
+                        message: message
+                    }]);
+
+                if (notificationError) {
+                    console.error(`Failed to create notification for job ${id} completion/failure:`, notificationError);
+                    // Don't fail the job update request, just log the error
+                }
+            }
+        }
+
+        ctx.response.body = updatedJob;
+
+    } catch (err) {
+        console.error(`Error updating compute job ${id}:`, err);
+        ctx.response.status = 500;
+        ctx.response.body = { error: "Internal server error during compute job update" };
+    }
+});
+
+
+export default router; -e 
+
+
+FILE: routes/scripts.ts
+import { Router, Context } from "oak";
+import { supabase } from "../db/supabaseClient.ts";
+import { Script, ScriptStatus } from "../db/models.ts";
+
+const router = new Router();
+
+// GET /api/scripts?session_id=<uuid> - List scripts for a session
+router.get("/", async (ctx: Context) => {
+    const sessionId = ctx.request.url.searchParams.get('session_id');
+
+    if (!sessionId) {
+        ctx.response.status = 400;
+        ctx.response.body = { error: "session_id query parameter is required" };
+        return;
+    }
+
+    // TODO: Security check: Does user own the parent session?
+    const { data, error } = await supabase
+        .from('scripts')
+        .select('*')
+        .eq('session_id', sessionId)
+        .order('created_at', { ascending: false });
+
+    if (error) {
+        ctx.response.status = 500;
+        ctx.response.body = { error: "Failed to fetch scripts", message: error.message };
+        return;
+    }
+    ctx.response.body = data;
+});
+
+// GET /api/scripts/:id - Get a specific script
+router.get("/:id", async (ctx: Context) => {
+    const { id } = ctx.params;
+    if (!id) {
+        ctx.response.status = 400;
+        ctx.response.body = { error: "Script ID is required" };
+        return;
+    }
+
+    // TODO: Add security check
+    const { data, error } = await supabase
+        .from('scripts')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+    if (error || !data) {
+        ctx.response.status = error?.code === 'PGRST116' ? 404 : 500;
+        ctx.response.body = { error: error?.code === 'PGRST116' ? "Script not found" : "Failed to fetch script", message: error?.message };
+        return;
+    }
+
+    ctx.response.body = data;
+});
+
+// POST /api/scripts - Create a new script record (likely triggered by VLM completion)
+router.post("/", async (ctx: Context) => {
+    try {
+        const body = await ctx.request.body.json();
+        const { session_id, content, status = 'pending' } = body as Partial<Script>;
+
+        // Basic validation
+        if (!session_id || !content) {
+            ctx.response.status = 400;
+            ctx.response.body = { error: "session_id and content are required" };
+            return;
+        }
+        if (!['pending', 'completed', 'failed'].includes(status)) {
+            ctx.response.status = 400;
+            ctx.response.body = { error: "Invalid status provided" };
+            return;
+        }
+
+        // TODO: Validate session_id exists and belongs to user
+
+        const { data, error } = await supabase
+            .from('scripts')
+            .insert([{ session_id, content, status }])
+            .select()
+            .single();
+
+        if (error) {
+            ctx.response.status = 500;
+            ctx.response.body = { error: "Failed to create script record", message: error.message };
+            return;
+        }
+
+        // TODO: Potentially trigger a notification for the user
+
+        ctx.response.status = 201;
+        ctx.response.body = data;
+    } catch (err) {
+        console.error("Error creating script record:", err);
+        ctx.response.status = 500;
+        ctx.response.body = { error: "Internal server error during script creation" };
+    }
+});
+
+// PUT /api/scripts/:id - Update script content or status
+router.put("/:id", async (ctx: Context) => {
+    const { id } = ctx.params;
+    if (!id) {
+        ctx.response.status = 400;
+        ctx.response.body = { error: "Script ID is required" };
+        return;
+    }
+
+    try {
+        const body = await ctx.request.body.json();
+        const { content, status } = body as Partial<Script>;
+
+        const updateData: Partial<Script> = {};
+        if (content !== undefined) updateData.content = content;
+        if (status !== undefined) {
+            if (!['pending', 'completed', 'failed'].includes(status)) {
+                ctx.response.status = 400;
+                ctx.response.body = { error: "Invalid status provided" };
+                return;
+            }
+            updateData.status = status;
+        }
+
+        if (Object.keys(updateData).length === 0) {
+            ctx.response.status = 400;
+            ctx.response.body = { error: "No update fields provided (content, status)" };
+            return;
+        }
+
+        // TODO: Security check
+        const { data, error } = await supabase
+            .from('scripts')
+            .update(updateData)
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error || !data) {
+            ctx.response.status = error?.code === 'PGRST116' ? 404 : 500;
+            ctx.response.body = { error: error?.code === 'PGRST116' ? "Script not found to update" : "Failed to update script", message: error?.message };
+            return;
+        }
+
+        // TODO: Trigger notification if status changed (e.g., to 'completed')
+
+        ctx.response.body = data;
+    } catch (err) {
+        console.error(`Error updating script ${id}:`, err);
+        ctx.response.status = 500;
+        ctx.response.body = { error: "Internal server error during script update" };
+    }
+});
+
+// DELETE /api/scripts/:id - Delete a script
+router.delete("/:id", async (ctx: Context) => {
+    const { id } = ctx.params;
+    if (!id) {
+        ctx.response.status = 400;
+        ctx.response.body = { error: "Script ID is required" };
+        return;
+    }
+
+    // TODO: Add security check
+    // Note: Cascading deletes should handle related activations, compute_jobs, notifications if set up correctly in DB schema
+
+    const { error } = await supabase
+        .from('scripts')
+        .delete()
+        .eq('id', id);
+
+    if (error) {
+        // Check if the error is because the script was not found
+        // Supabase delete doesn't error on not found, but count might be 0 if needed
+        ctx.response.status = 500;
+        ctx.response.body = { error: "Failed to delete script", message: error.message };
+        return;
+    }
+
+    ctx.response.status = 204; // No Content
+});
+
+export default router; -e 
+
+
+FILE: routes/notifications.ts
+import { Router, Context } from "oak";
+import { supabase } from "../db/supabaseClient.ts";
+import { Notification } from "../db/models.ts";
+
+const router = new Router();
+
+// GET /api/notifications?user_id=<uuid>&unread_only=true - List notifications for a user
+router.get("/", async (ctx: Context) => {
+    const userId = ctx.request.url.searchParams.get('user_id');
+    const unreadOnly = ctx.request.url.searchParams.get('unread_only') === 'true';
+    // TODO: Get user_id from authenticated session/token instead of query param
+
+    if (!userId) {
+        ctx.response.status = 400;
+        ctx.response.body = { error: "user_id query parameter is required (or derived from auth)" };
+        return;
+    }
+
+    let query = supabase
+        .from('notifications')
+        .select('*')
+        .eq('user_id', userId);
+
+    if (unreadOnly) {
+        query = query.eq('is_read', false);
+    }
+
+    query = query.order('created_at', { ascending: false });
+
+    const { data, error } = await query;
+
+    if (error) {
+        ctx.response.status = 500;
+        ctx.response.body = { error: "Failed to fetch notifications", message: error.message };
+        return;
+    }
+    ctx.response.body = data;
+});
+
+// PUT /api/notifications/:id/read - Mark a notification as read
+router.put("/:id/read", async (ctx: Context) => {
+    const { id } = ctx.params;
+    if (!id) {
+        ctx.response.status = 400;
+        ctx.response.body = { error: "Notification ID is required" };
+        return;
+    }
+
+    // TODO: Security check: Does user own this notification?
+    const { data, error } = await supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('id', id)
+        // Optional: Add .eq('user_id', authenticatedUserId) for security
+        .select()
+        .single();
+
+    if (error || !data) {
+        ctx.response.status = error?.code === 'PGRST116' ? 404 : 500;
+        ctx.response.body = { error: error?.code === 'PGRST116' ? "Notification not found to mark as read" : "Failed to update notification", message: error?.message };
+        return;
+    }
+
+    ctx.response.body = { success: true, notification: data };
+});
+
+// POST /api/notifications/read-all - Mark all user notifications as read
+router.post("/read-all", async (ctx: Context) => {
+    // TODO: Get user_id from authenticated session/token
+    const body = await ctx.request.body.json();
+    const userId = body?.user_id;
+
+    if (!userId) {
+        ctx.response.status = 400;
+        ctx.response.body = { error: "user_id is required in request body (or derived from auth)" };
+        return;
+    }
+
+    const { error, count } = await supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('user_id', userId)
+        .eq('is_read', false); // Only update unread ones
+
+    if (error) {
+        ctx.response.status = 500;
+        ctx.response.body = { error: "Failed to mark all notifications as read", message: error.message };
+        return;
+    }
+
+    ctx.response.body = { success: true, updated_count: count ?? 0 };
+});
+
+export default router; -e 
+
+
+FILE: routes/images.ts
+import { Router, Context } from "oak";
+import { supabase } from "../db/supabaseClient.ts";
+import { Image } from "../db/models.ts";
+import { v4 as uuid } from "uuid";
+
+const router = new Router();
+
+// Constants for Supabase Storage
+const IMAGE_BUCKET = "session_images"; // Replace with your actual bucket name
+
+// GET /api/images?recording_id=<uuid> - List images for a recording
+router.get("/", async (ctx: Context) => {
+    const recordingId = ctx.request.url.searchParams.get('recording_id');
+
+    if (!recordingId) {
+        ctx.response.status = 400;
+        ctx.response.body = { error: "recording_id query parameter is required" };
+        return;
+    }
+
+    // TODO: Security check: Does user own the parent recording/session?
+    const { data, error } = await supabase
+        .from('images')
+        .select('id, recording_id, sequence, captured_at, file_path') // Select specific fields
+        .eq('recording_id', recordingId)
+        .order('sequence', { ascending: true, nullsFirst: false })
+        .order('captured_at', { ascending: true });
+
+    if (error) {
+        ctx.response.status = 500;
+        ctx.response.body = { error: "Failed to fetch images", message: error.message };
+        return;
+    }
+
+    // Optionally generate signed URLs for accessing the images
+    // const imagesWithUrls = await Promise.all(data.map(async (img) => {
+    //     const { data: urlData, error: urlError } = await supabase.storage
+    //         .from(IMAGE_BUCKET)
+    //         .createSignedUrl(img.file_path, 60 * 60); // Link valid for 1 hour
+    //     return { ...img, signedUrl: urlError ? null : urlData?.signedUrl };
+    // }));
+    // ctx.response.body = imagesWithUrls;
+
+    ctx.response.body = data; // Return paths for now
+});
+
+// POST /api/images - Upload a new image associated with a recording
+// Expects multipart/form-data with 'file' and 'recording_id', 'sequence' (optional)
+router.post("/", async (ctx: Context) => {
+    try {
+        if (!ctx.request.hasBody) {
+            ctx.response.status = 400;
+            ctx.response.body = { error: "Request body is required (multipart/form-data)" };
+            return;
+        }
+
+        const formData = await ctx.request.body.formData();
+        console.log(formData);
+
+        const file = formData.files?.[0];
+        const recordingId = formData.fields['recording_id'];
+        const sequence = formData.fields['sequence'] ? parseInt(formData.fields['sequence']) : null;
+        const capturedAt = formData.fields['captured_at'] || new Date().toISOString(); // Allow overriding capture time
+
+        if (!file || !file.content || !file.filename) {
+            ctx.response.status = 400;
+            ctx.response.body = { error: "Image file ('file') is required" };
+            return;
+        }
+        if (!recordingId) {
+            ctx.response.status = 400;
+            ctx.response.body = { error: "recording_id field is required" };
+            return;
+        }
+
+        // TODO: Validate recordingId exists and belongs to the user
+
+        // Create a unique file path in Supabase Storage
+        const fileExt = file.filename.split('.').pop();
+        const filePath = `${recordingId}/${uuid.generate()}.${fileExt}`;
+
+        // Upload file to Supabase Storage
+        const { data: uploadData, error: uploadError } = await supabase.storage
+            .from(IMAGE_BUCKET)
+            .upload(filePath, file.content, {
+                contentType: file.contentType,
+                cacheControl: '3600', // Example cache control
+                upsert: false // Don't overwrite existing files with the same name
+            });
+
+        if (uploadError) {
+            console.error("Supabase Storage upload error:", uploadError);
+            ctx.response.status = 500;
+            ctx.response.body = { error: "Failed to upload image to storage", message: uploadError.message };
+            return;
+        }
+
+        // Insert image metadata into the database
+        const { data: dbData, error: dbError } = await supabase
+            .from('images')
+            .insert([{
+                recording_id: recordingId,
+                file_path: uploadData.path, // Use the path returned by storage
+                sequence: sequence,
+                captured_at: capturedAt
+            }])
+            .select()
+            .single();
+
+        if (dbError) {
+            // Attempt to delete the uploaded file if DB insert fails
+            console.error("Database insert error after upload:", dbError);
+            await supabase.storage.from(IMAGE_BUCKET).remove([filePath]);
+            ctx.response.status = 500;
+            ctx.response.body = { error: "Failed to save image metadata to database", message: dbError.message };
+            return;
+        }
+
+        ctx.response.status = 201;
+        ctx.response.body = dbData;
+
+    } catch (err) {
+        console.error("Error uploading image:", err);
+        ctx.response.status = 500;
+        ctx.response.body = { error: "Internal server error during image upload" };
+    }
+});
+
+// GET /api/images/:id - Get specific image metadata (not the file itself)
+router.get("/:id", async (ctx: Context) => {
+    const { id } = ctx.params;
+    if (!id) {
+        ctx.response.status = 400;
+        ctx.response.body = { error: "Image ID is required" };
+        return;
+    }
+
+    // TODO: Add security check
+    const { data, error } = await supabase
+        .from('images')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+    if (error || !data) {
+        ctx.response.status = error?.code === 'PGRST116' ? 404 : 500;
+        ctx.response.body = { error: error?.code === 'PGRST116' ? "Image metadata not found" : "Failed to fetch image metadata", message: error?.message };
+        return;
+    }
+
+    // You might want to add the signed URL here too
+    ctx.response.body = data;
+});
+
+// DELETE /api/images/:id - Delete image metadata and file from storage
+router.delete("/:id", async (ctx: Context) => {
+    const { id } = ctx.params;
+    if (!id) {
+        ctx.response.status = 400;
+        ctx.response.body = { error: "Image ID is required" };
+        return;
+    }
+
+    // TODO: Add security check
+
+    // 1. Get file path from DB
+    const { data: imageData, error: fetchError } = await supabase
+        .from('images')
+        .select('file_path')
+        .eq('id', id)
+        .single();
+
+    if (fetchError || !imageData) {
+        ctx.response.status = fetchError?.code === 'PGRST116' ? 404 : 500;
+        ctx.response.body = { error: fetchError?.code === 'PGRST116' ? "Image metadata not found" : "Failed to fetch image metadata before delete", message: fetchError?.message };
+        return;
+    }
+
+    // 2. Delete from DB
+    const { error: dbDeleteError } = await supabase
+        .from('images')
+        .delete()
+        .eq('id', id);
+
+    if (dbDeleteError) {
+        ctx.response.status = 500;
+        ctx.response.body = { error: "Failed to delete image metadata from database", message: dbDeleteError.message };
+        // Don't proceed to storage deletion if DB deletion failed
+        return;
+    }
+
+    // 3. Delete from Storage (best effort, log error if it fails)
+    const { error: storageDeleteError } = await supabase.storage
+        .from(IMAGE_BUCKET)
+        .remove([imageData.file_path]);
+
+    if (storageDeleteError) {
+        // Log this error, but usually return success as the DB record is gone
+        console.error(`Failed to delete image ${imageData.file_path} from storage after DB deletion:`, storageDeleteError);
+    }
+
+    ctx.response.status = 204; // No Content
+});
+
+export default router; -e 
+
+
+FILE: routes/activations.ts
+import { Router, Context } from "oak";
+import { supabase } from "../db/supabaseClient.ts";
+import { Activation } from "../db/models.ts";
+
+const router = new Router();
+
+// GET /api/activations?user_id=<uuid> - List activations for a user
+router.get("/", async (ctx: Context) => {
+    const userId = ctx.request.url.searchParams.get('user_id');
+    // TODO: Get user_id from authenticated session/token instead of query param
+
+    if (!userId) {
+        ctx.response.status = 400;
+        ctx.response.body = { error: "user_id query parameter is required (or derived from auth)" };
+        return;
+    }
+
+    const { data, error } = await supabase
+        .from('activations')
+        .select(`
+            id, context, activated_at,
+            script:scripts(id, session_id, status) 
+        `)
+        .eq('user_id', userId)
+        .order('activated_at', { ascending: false });
+
+    if (error) {
+        ctx.response.status = 500;
+        ctx.response.body = { error: "Failed to fetch activations", message: error.message };
+        return;
+    }
+    ctx.response.body = data;
+});
+
+// GET /api/activations/:id - Get a specific activation
+router.get("/:id", async (ctx: Context) => {
+    const { id } = ctx.params;
+    if (!id) {
+        ctx.response.status = 400;
+        ctx.response.body = { error: "Activation ID is required" };
+        return;
+    }
+
+    // TODO: Add security check (user owns this activation)
+    const { data, error } = await supabase
+        .from('activations')
+        .select(`*, script:scripts(*)`)
+        .eq('id', id)
+        .single();
+
+    if (error || !data) {
+        ctx.response.status = error?.code === 'PGRST116' ? 404 : 500;
+        ctx.response.body = { error: error?.code === 'PGRST116' ? "Activation not found" : "Failed to fetch activation", message: error?.message };
+        return;
+    }
+
+    ctx.response.body = data;
+});
+
+// POST /api/activations - Trigger a script activation
+router.post("/", async (ctx: Context) => {
+    try {
+        const body = await ctx.request.body.json();
+        const { user_id, script_id, context } = body as Partial<Activation>;
+
+        // Basic validation
+        if (!user_id || !script_id) {
+            ctx.response.status = 400;
+            ctx.response.body = { error: "user_id and script_id are required" };
+            return;
+        }
+        // TODO: Validate user_id from auth token
+        // TODO: Validate script_id exists and is in a 'completed' state?
+
+        // 1. Create the activation record
+        const { data: activationData, error: activationError } = await supabase
+            .from('activations')
+            .insert([{ user_id, script_id, context }])
+            .select()
+            .single();
+
+        if (activationError) {
+            ctx.response.status = 500;
+            ctx.response.body = { error: "Failed to create activation record", message: activationError.message };
+            return;
+        }
+
+        // --- Trigger Compute Job --- 
+        // 2. Create a corresponding compute_job record
+        const { data: jobData, error: jobError } = await supabase
+            .from('compute_jobs')
+            .insert([{
+                script_id: script_id,
+                context: context, // Pass activation context to the job
+                status: 'queued' // Start as queued
+            }])
+            .select('id') // Only need the ID for response
+            .single();
+
+        if (jobError) {
+            // Attempt to clean up the activation record if job creation fails?
+            // Or mark activation as failed?
+            console.error(`Failed to create compute_job for activation ${activationData.id}:`, jobError);
+            ctx.response.status = 500;
+            ctx.response.body = {
+                error: "Activation created, but failed to queue compute job",
+                message: jobError.message,
+                activation: activationData // Return activation data anyway
+            };
+            return;
+        }
+
+        // 3. (Placeholder) Notify the actual compute service/worker to pick up this job_id
+        console.log(`Placeholder: Notify compute service to start job ${jobData.id} for script ${script_id}`);
+        // This could involve adding the job ID to a message queue (e.g., RabbitMQ, SQS) 
+        // or calling an API endpoint on the compute service.
+
+        ctx.response.status = 201;
+        ctx.response.body = {
+            activation: activationData,
+            compute_job_id: jobData.id
+        };
+
+    } catch (err) {
+        console.error("Error creating activation:", err);
+        ctx.response.status = 500;
+        ctx.response.body = { error: "Internal server error during activation" };
+    }
+});
+
+export default router; -e 
+
+
+FILE: routes/users.ts
+import { Router, Context, State } from "oak";
+import { supabase } from "../db/supabaseClient.ts";
+import { User } from "../db/models.ts";
+import { privateEncrypt } from "node:crypto";
+
+const router = new Router();
+
+// GET /api/users - List all users (potentially limited or secured)
+router.get("/", async (ctx: Context) => {
+    const { data, error } = await supabase
+        .from('users')
+        .select('*');
+
+    if (error) {
+        ctx.response.status = 500;
+        ctx.response.body = { error: "Failed to fetch users", message: error.message };
+        return;
+    }
+    ctx.response.body = data;
+});
+
+// GET /api/users/:id - Get a specific user by ID
+router.get("/:id", async (ctx: Context) => {
+    const { id } = ctx.params;
+    if (!id) {
+        ctx.response.status = 400;
+        ctx.response.body = { error: "User ID is required" };
+        return;
+    }
+
+    const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', id)
+        .single(); // Use .single() if expecting one or zero results
+
+    if (error) {
+        ctx.response.status = 500;
+        if (error.code === 'PGRST116') { // Error code for no rows found
+            ctx.response.status = 404;
+            ctx.response.body = { error: "User not found" };
+        } else {
+            ctx.response.body = { error: "Failed to fetch user", message: error.message };
+        }
+        return;
+    }
+
+    if (!data) {
+        ctx.response.status = 404;
+        ctx.response.body = { error: "User not found" };
+        return;
+    }
+
+    ctx.response.body = data;
+});
+
+// POST /api/users - Create a new user (example)
+// In practice, user creation might happen via Supabase Auth or implicitly
+router.post("/", async (ctx: Context) => {
+    try {
+        const body = await ctx.request.body.json();
+        console.log(body);
+        const { name, email } = body as Partial<User>;
+
+        // Basic validation
+        if (!email) { // Assuming email is the minimum required field
+            ctx.response.status = 400;
+            ctx.response.body = { error: "Email is required to create a user" };
+            return;
+        }
+
+        const { data, error } = await supabase
+            .from('users')
+            .insert([{ name, email }])
+            .select()
+            .single();
+
+        if (error) {
+            // Handle potential unique constraint violation for email
+            if (error.code === '23505') { // Unique violation code
+                ctx.response.status = 409; // Conflict
+                ctx.response.body = { error: "User with this email already exists", message: error.message };
+            } else {
+                ctx.response.status = 500;
+                ctx.response.body = { error: "Failed to create user", message: error.message };
+            }
+            return;
+        }
+
+        ctx.response.status = 201;
+        ctx.response.body = data;
+    } catch (err) {
+        console.error("Error creating user:", err);
+        ctx.response.status = 500;
+        ctx.response.body = { error: "Internal server error during user creation" };
+    }
+});
+
+// Add PUT (update) and DELETE routes as needed, respecting security principles.
+
+export default router; -e 
+
+
+FILE: routes/recordings.ts
+import { Router, Context } from "oak";
+import { supabase } from "../db/supabaseClient.ts";
+import { Recording } from "../db/models.ts";
+
+const router = new Router();
+
+// GET /api/recordings?session_id=<uuid> - List recordings for a session
+router.get("/", async (ctx: Context) => {
+    const sessionId = ctx.request.url.searchParams.get('session_id');
+
+    if (!sessionId) {
+        ctx.response.status = 400;
+        ctx.response.body = { error: "session_id query parameter is required" };
+        return;
+    }
+
+    // TODO: Add security check - does the current user own the parent session?
+
+    const { data, error } = await supabase
+        .from('recordings')
+        .select('*')
+        .eq('session_id', sessionId)
+        .order('start_time', { ascending: true });
+
+    if (error) {
+        ctx.response.status = 500;
+        ctx.response.body = { error: "Failed to fetch recordings", message: error.message };
+        return;
+    }
+    ctx.response.body = data;
+});
+
+// GET /api/recordings/:id - Get a specific recording
+router.get("/:id", async (ctx: Context) => {
+    const { id } = ctx.params;
+    if (!id) {
+        ctx.response.status = 400;
+        ctx.response.body = { error: "Recording ID is required" };
+        return;
+    }
+
+    // TODO: Add security check
+    const { data, error } = await supabase
+        .from('recordings')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+    if (error || !data) {
+        ctx.response.status = error?.code === 'PGRST116' ? 404 : 500;
+        ctx.response.body = { error: error?.code === 'PGRST116' ? "Recording not found" : "Failed to fetch recording", message: error?.message };
+        return;
+    }
+
+    ctx.response.body = data;
+});
+
+// POST /api/recordings - Create a new recording period within a session
+router.post("/", async (ctx: Context) => {
+    try {
+        const body = await ctx.request.body.json();
+        const { session_id, start_time, end_time } = body as Partial<Recording>;
+
+        // Basic validation
+        if (!session_id || !start_time || !end_time) {
+            ctx.response.status = 400;
+            ctx.response.body = { error: "session_id, start_time, and end_time are required" };
+            return;
+        }
+
+        // TODO: Validate session_id exists and belongs to user
+        // TODO: Validate time format/values
+
+        const { data, error } = await supabase
+            .from('recordings')
+            .insert([{ session_id, start_time, end_time }])
+            .select()
+            .single();
+
+        if (error) {
+            ctx.response.status = 500;
+            ctx.response.body = { error: "Failed to create recording", message: error.message };
+            return;
+        }
+
+        ctx.response.status = 201;
+        ctx.response.body = data;
+    } catch (err) {
+        console.error("Error creating recording:", err);
+        ctx.response.status = 500;
+        ctx.response.body = { error: "Internal server error during recording creation" };
+    }
+});
+
+// Add PUT/DELETE if modification/deletion of recording periods is needed.
+
+export default router; -e 
+
+
+FILE: routes/sessions.ts
+import { Router, Context } from "oak";
+import { supabase } from "../db/supabaseClient.ts";
+import { Session } from "../db/models.ts";
+
+const router = new Router();
+
+// GET /api/sessions - List sessions (consider filtering by user_id)
+router.get("/", async (ctx: Context) => {
+    // TODO: Implement filtering, pagination, and security (e.g., user can only see their sessions)
+    const { data, error } = await supabase
+        .from('sessions')
+        .select('*')
+        .order('started_at', { ascending: false }); // Example ordering
+
+    if (error) {
+        ctx.response.status = 500;
+        ctx.response.body = { error: "Failed to fetch sessions", message: error.message };
+        return;
+    }
+    ctx.response.body = data;
+});
+
+// GET /api/sessions/:id - Get a specific session
+router.get("/:id", async (ctx: Context) => {
+    const { id } = ctx.params;
+    if (!id) {
+        ctx.response.status = 400;
+        ctx.response.body = { error: "Session ID is required" };
+        return;
+    }
+
+    // TODO: Add security check - does the current user own this session?
+    const { data, error } = await supabase
+        .from('sessions')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+    if (error || !data) {
+        ctx.response.status = error?.code === 'PGRST116' ? 404 : 500;
+        ctx.response.body = { error: error?.code === 'PGRST116' ? "Session not found" : "Failed to fetch session", message: error?.message };
+        return;
+    }
+
+    ctx.response.body = data;
+});
+
+// POST /api/sessions - Start a new session
+router.post("/", async (ctx: Context) => {
+    try {
+        const body = await ctx.request.body.json();
+        const { user_id, context } = body as Partial<Session>;
+
+        // Basic validation
+        if (!user_id) {
+            ctx.response.status = 400;
+            ctx.response.body = { error: "user_id is required to start a session" };
+            return;
+        }
+
+        // TODO: Validate user_id exists in the users table
+
+        const { data, error } = await supabase
+            .from('sessions')
+            .insert([{ user_id, context }])
+            .select()
+            .single();
+
+        if (error) {
+            ctx.response.status = 500;
+            ctx.response.body = { error: "Failed to create session", message: error.message };
+            return;
+        }
+
+        ctx.response.status = 201;
+        ctx.response.body = data;
+    } catch (err) {
+        console.error("Error creating session:", err);
+        ctx.response.status = 500;
+        ctx.response.body = { error: "Internal server error during session creation" };
+    }
+});
+
+// PUT /api/sessions/:id - End a session (update ended_at)
+router.put("/:id/end", async (ctx: Context) => {
+    const { id } = ctx.params;
+    if (!id) {
+        ctx.response.status = 400;
+        ctx.response.body = { error: "Session ID is required" };
+        return;
+    }
+
+    // TODO: Add security check - does the current user own this session?
+
+    const { data, error } = await supabase
+        .from('sessions')
+        .update({ ended_at: new Date().toISOString() })
+        .eq('id', id)
+        .select()
+        .single();
+
+    if (error || !data) {
+        ctx.response.status = error?.code === 'PGRST116' ? 404 : 500;
+        ctx.response.body = { error: error?.code === 'PGRST116' ? "Session not found to end" : "Failed to end session", message: error?.message };
+        return;
+    }
+
+    ctx.response.body = data;
+});
+
+// Add DELETE route if necessary, considering cascading deletes.
+
+export default router; -e 
+
+

@@ -1,0 +1,24 @@
+{
+    "name": "@local/automateboringstuff-server",
+    "version": "1.0.0",
+    "description": "Server for AutomateBoringStuff - AI-powered task automation",
+    "exports": "./main.ts",
+    "compilerOptions": {
+        "strict": true,
+        "noImplicitAny": true
+    },
+    "imports": {
+        "std/": "https://deno.land/std/",
+        "oak": "https://deno.land/x/oak/mod.ts",
+        "cors": "https://deno.land/x/cors/mod.ts",
+        "dotenv": "https://deno.land/x/dotenv/mod.ts",
+        "@supabase/supabase-js": "npm:@supabase/supabase-js@^2",
+        "uuid": "https://deno.land/std/uuid/mod.ts"
+    },
+    "tasks": {
+        "start": "deno run --allow-net --allow-read --allow-write --allow-env main.ts",
+        "dev": "deno run --allow-net --allow-read --allow-write --allow-env --watch main.ts",
+        "test": "deno test --allow-net --allow-read --allow-write --allow-env",
+        "cache": "deno cache --reload main.ts"
+    }
+}
