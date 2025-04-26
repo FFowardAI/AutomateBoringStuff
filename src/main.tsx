@@ -1,13 +1,25 @@
 import React, { useState } from 'react'
 import ReactDOM from 'react-dom/client'
-import { motion, AnimatePresence } from 'framer-motion'
+import { AnimatePresence } from 'framer-motion'
 import './main.css'
+import { EmptyView } from './components/EmptyView'
+import { RecordingView } from './components/RecordingView'
 
 const App: React.FC = () => {
   const [isRecording, setIsRecording] = useState(false);
 
   const handleRecordClick = () => {
     setIsRecording(true);
+  };
+
+  const handleCancelClick = () => {
+    setIsRecording(false);
+  };
+
+  const handleDoneClick = () => {
+    // TODO: Implement actual done logic (e.g., save recording)
+    console.log("Recording finished (placeholder)");
+    setIsRecording(false); // Go back to empty view for now
   };
 
   return (
@@ -18,54 +30,16 @@ const App: React.FC = () => {
       <div className="app__body">
         <AnimatePresence mode="wait">
           {isRecording ? (
-            <motion.div
-              key="recording"
-              className="recording-state"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.3 }}
-            >
-              <p className="recording-text">Recording...</p>
-              <motion.div
-                className="recording-dot"
-                animate={{
-                  scale: [1, 1.2, 1, 1.2, 1],
-                  opacity: [1, 0.7, 1, 0.7, 1],
-                }}
-                transition={{
-                  duration: 1.5,
-                  repeat: Infinity,
-                  ease: "easeInOut"
-                }}
-              />
-              <div className="button-group">
-                <button className="button button--secondary" onClick={() => setIsRecording(false)}>
-                  Cancel
-                </button>
-                <button className="button button--primary" onClick={() => { /* TODO: Add done logic */ }}>
-                  Done
-                </button>
-              </div>
-            </motion.div>
+            <RecordingView
+              key="recording" // Key needed directly on the component for AnimatePresence
+              onCancelClick={handleCancelClick}
+              onDoneClick={handleDoneClick}
+            />
           ) : (
-            <motion.div
-              key="initial"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.3 }}
-              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}
-            >
-              <ul className="roadmap">
-                <li className="roadmap__item">1. click Record</li>
-                <li className="roadmap__item">2. do boring stuff</li>
-                <li className="roadmap__item">3. never do it again</li>
-              </ul>
-              <button className="button button--primary" onClick={handleRecordClick}>
-                Record
-              </button>
-            </motion.div>
+            <EmptyView
+              key="initial" // Key needed directly on the component for AnimatePresence
+              onRecordClick={handleRecordClick}
+            />
           )}
         </AnimatePresence>
       </div>
