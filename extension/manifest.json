@@ -11,7 +11,8 @@
     "cookies",
     "scripting",
     "storage",
-    "desktopCapture"
+    "desktopCapture",
+    "activeTab"
   ],
   "host_permissions": [
     "http://localhost:8001/*",

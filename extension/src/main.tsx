@@ -23,7 +23,7 @@ interface User {
 // Combine view states
 type ViewState = 'authenticating' | 'authRequired' | 'loading' | 'empty' | 'recording' | 'error';
 
-const API_BASE_URL = "https://5aca-4-39-199-2.ngrok-free.app"; // Define your backend URL
+const API_BASE_URL = "https://31ca-4-39-199-2.ngrok-free.app"; // Define your backend URL
 // AUTH_COOKIE_NAME is no longer checked here, but might still be relevant for backend interactions
 // const AUTH_COOKIE_NAME = "auth_session";
 
