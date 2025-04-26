@@ -1,7 +1,7 @@
 {
     "info": {
         "_postman_id": "f4a1b2c3-d4e5-f6a7-b8c9-d0e1f2a3b4c5",
-        "name": "AutomateBoringStuff - Supabase Server",
+        "name": "AutomateBoringStuff - 2 - Supabase Server",
         "description": "API collection for the Supabase backend of AutomateBoringStuff.",
         "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
         "_exporter_id": "0"
@@ -266,7 +266,7 @@
                         ],
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n    \"session_id\": \"<session_uuid>\",\n    \"start_time\": \"2024-01-01T10:00:00Z\", \n    \"end_time\": \"2024-01-01T10:05:00Z\"\n}",
+                            "raw": "{\n    \"session_id\": \"<session_uuid>\",\n    \"start_time\": \"2024-01-01T10:00:00Z\"\n}",
                             "options": {
                                 "raw": {
                                     "language": "json"
@@ -282,7 +282,102 @@
                                 "api",
                                 "recordings"
                             ]
-                        }
+                        },
+                        "description": "Creates a new recording with just the start time. No end_time is needed until recording is complete."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "End Recording",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json",
+                                "type": "text"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"end_time\": \"2024-01-01T10:05:00Z\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}/api/recordings/:id/end",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "api",
+                                "recordings",
+                                ":id",
+                                "end"
+                            ],
+                            "variable": [
+                                {
+                                    "key": "id",
+                                    "value": "<recording_uuid>",
+                                    "description": "UUID of the recording to end"
+                                }
+                            ]
+                        },
+                        "description": "Ends a recording by setting the end_time. If no end_time is provided, the current time is used."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Finalize Recording & Generate Script",
+                    "request": {
+                        "method": "POST",
+                        "header": [],
+                        "body": {
+                            "mode": "formdata",
+                            "formdata": [
+                                {
+                                    "key": "files",
+                                    "type": "file",
+                                    "src": [],
+                                    "description": "(Optional) Images to upload. If images were already uploaded separately, this is not needed. Supports multiple files."
+                                },
+                                {
+                                    "key": "sequence",
+                                    "value": "0",
+                                    "type": "text",
+                                    "description": "(Optional) Starting sequence number for images"
+                                },
+                                {
+                                    "key": "captured_at",
+                                    "value": "",
+                                    "type": "text",
+                                    "description": "(Optional) Capture timestamp for images"
+                                }
+                            ]
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}/api/recordings/:id/finalize",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "api",
+                                "recordings",
+                                ":id",
+                                "finalize"
+                            ],
+                            "variable": [
+                                {
+                                    "key": "id",
+                                    "value": "<recording_uuid>",
+                                    "description": "UUID of the recording to finalize"
+                                }
+                            ]
+                        },
+                        "description": "Finalizes a recording, optionally uploads images, and generates a script via the VLM service. Can be called with or without images."
                     },
                     "response": []
                 }
@@ -325,9 +420,10 @@
                             "mode": "formdata",
                             "formdata": [
                                 {
-                                    "key": "file",
+                                    "key": "files",
                                     "type": "file",
-                                    "src": []
+                                    "src": [],
+                                    "description": "Image files to upload. Supports multiple files."
                                 },
                                 {
                                     "key": "recording_id",
@@ -338,13 +434,13 @@
                                     "key": "sequence",
                                     "value": "1",
                                     "type": "text",
-                                    "description": "(Optional) Sequence number of the image in the recording"
+                                    "description": "(Optional) Starting sequence number for the images"
                                 },
                                 {
                                     "key": "captured_at",
                                     "value": "2024-01-01T10:01:15Z",
                                     "type": "text",
-                                    "description": "(Optional) Timestamp when image was captured"
+                                    "description": "(Optional) Timestamp when images were captured"
                                 }
                             ]
                         },
@@ -358,7 +454,7 @@
                                 "images"
                             ]
                         },
-                        "description": "Upload an image file using multipart/form-data."
+                        "description": "Upload image files using multipart/form-data. Supports multiple file uploads."
                     },
                     "response": []
                 },
@@ -847,6 +943,46 @@
                             ]
                         },
                         "description": "Marks all unread notifications for the specified user as read."
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "VLM",
+            "item": [
+                {
+                    "name": "Analyze Images & Generate Script",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json",
+                                "type": "text"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"recording_id\": \"<recording_uuid>\",\n    \"session_id\": \"<session_uuid>\",\n    \"use_default_prompt\": true,\n    \"custom_prompt\": \"Optional additional instructions for the analysis\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}/api/vlm/analyze",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "api",
+                                "vlm",
+                                "analyze"
+                            ]
+                        },
+                        "description": "Analyzes all images from a recording and generates an automation script. The script is saved to the database and linked to the session. This endpoint gets all chronologically ordered images for the recording, analyzes them with Claude, and creates a detailed step-by-step script to reproduce the workflow."
                     },
                     "response": []
                 }

@@ -19,7 +19,7 @@ import activationsRoutes from "./routes/activations.ts";
 import computeJobsRoutes from "./routes/compute_jobs.ts";
 import notificationsRoutes from "./routes/notifications.ts";
 // Placeholder routes for external integrations
-// import vlmRoutes from "./routes/vlm.ts";
+import vlmRoutes from "./routes/vlm.ts";
 // import computerUseRoutes from "./routes/computer_use.ts";
 
 // Parse command line arguments
@@ -86,7 +86,7 @@ router.use("/api/activations", activationsRoutes.routes(), activationsRoutes.all
 router.use("/api/compute_jobs", computeJobsRoutes.routes(), computeJobsRoutes.allowedMethods());
 router.use("/api/notifications", notificationsRoutes.routes(), notificationsRoutes.allowedMethods());
 // Placeholder routes
-// router.use("/api/vlm", vlmRoutes.routes(), vlmRoutes.allowedMethods());
+router.use("/api/vlm", vlmRoutes.routes(), vlmRoutes.allowedMethods());
 // router.use("/api/computer-use", computerUseRoutes.routes(), computerUseRoutes.allowedMethods());
 
 // Add router middleware

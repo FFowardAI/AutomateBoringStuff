@@ -5,7 +5,7 @@ import { SupabaseClient } from '@supabase/supabase-js';
 // Load environment variables
 const env = await config({ safe: true, export: true });
 
-const supabaseUrl = env.SUPABASE_URL;
+export const supabaseUrl = env.SUPABASE_URL;
 const supabaseKey = env.SUPABASE_ANON_KEY; // Use ANON key by default
 // const supabaseServiceKey = env.SUPABASE_SERVICE_ROLE_KEY;
 
