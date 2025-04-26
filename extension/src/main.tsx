@@ -53,7 +53,7 @@ const App: React.FC = () => {
       };
 
       captureFrame(); // Capture the first frame immediately
-      intervalRef.current = setInterval(captureFrame, 500); // Capture every 500ms
+      intervalRef.current = window.setInterval(captureFrame, 500); // Capture every 500ms
 
     } else {
       console.error('chrome.tabs.captureVisibleTab API not available.');
@@ -89,7 +89,7 @@ const App: React.FC = () => {
       <div className="app__body">
         <AnimatePresence mode="wait">
           {viewState === 'empty' && (
-            <EmptyView key="empty" onRecordClick={startRecording} />
+            <EmptyView onRandomViewClick={() => {}} key="empty" onRecordClick={startRecording} />
           )}
           {/* Removed PermissionGuideView and 'permissionNeeded' state */}
           {viewState === 'recording' && (
