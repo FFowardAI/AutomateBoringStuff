@@ -1,140 +1,118 @@
-import React, { useState, useRef, useCallback } from 'react'
+import React, { useState, useRef, useCallback, useEffect } from 'react'
 import ReactDOM from 'react-dom/client'
 import { AnimatePresence, motion } from 'framer-motion'
 import './main.css'
 import { EmptyView } from './components/EmptyView'
 import { RecordingView } from './components/RecordingView'
-import { PermissionGuideView } from './components/PermissionGuideView'
+// PermissionGuideView is likely not needed for captureVisibleTab
+// import { PermissionGuideView } from './components/PermissionGuideView'
 
-type ViewState = 'empty' | 'permissionNeeded' | 'capturing' | 'recording';
+type ViewState = 'empty' | 'recording' | 'error'; // Simplified states
 
 const App: React.FC = () => {
   const [viewState, setViewState] = useState<ViewState>('empty');
   const [screenshots, setScreenshots] = useState<string[]>([]);
-  const streamRef = useRef<MediaStream | null>(null);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const intervalRef = useRef<number | null>(null); // Use number for setInterval ID in browser
 
-  // Function to clean up stream and video element
-  const cleanupMedia = useCallback(() => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-    if (videoRef.current) {
-      videoRef.current.remove();
-      videoRef.current = null;
+  // Function to clean up interval
+  const cleanupCapture = useCallback(() => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
     }
   }, []);
 
-  // Function to start the screen capture process
-  const startCapture = useCallback(() => {
-    setViewState('capturing'); // Indicate we are trying to capture
-    cleanupMedia(); // Clean up any previous media
+  // Function to start capturing screenshots from the active tab
+  const startRecording = useCallback(() => {
+    cleanupCapture(); // Clean up any previous interval
+    setScreenshots([]); // Clear previous screenshots
+    setErrorMessage(null); // Clear previous errors
+    setViewState('recording'); // Move to recording view
 
-    if (chrome.desktopCapture?.chooseDesktopMedia) {
-      chrome.desktopCapture.chooseDesktopMedia(
-        ['screen', 'window', 'tab'],
-        (streamId) => {
-          if (!streamId) {
-            console.warn('User cancelled desktop capture');
-            setViewState('empty'); // Go back if user cancels picker
-            return;
+    if (chrome.tabs?.captureVisibleTab) {
+      // Start capturing immediately and then set an interval
+      const captureFrame = () => {
+        chrome.tabs.captureVisibleTab(
+          // Use the current window. Passing null/undefined uses the current window.
+          // Specify options like format and quality if needed.
+          { format: 'png' }, 
+          (dataUrl) => {
+            if (chrome.runtime.lastError) {
+              console.error('Error capturing tab:', chrome.runtime.lastError.message);
+              setErrorMessage(`Error capturing tab: ${chrome.runtime.lastError.message}`);
+              setViewState('error'); // Go to an error state
+              cleanupCapture(); // Stop trying
+              return;
+            }
+            if (dataUrl) {
+              setScreenshots((prev) => [...prev, dataUrl]);
+            }
           }
+        );
+      };
 
-          navigator.mediaDevices.getUserMedia({
-            audio: false,
-            video: {
-              // @ts-ignore
-              mandatory: {
-                chromeMediaSource: 'desktop',
-                chromeMediaSourceId: streamId
-              }
-            }
-          }).then((stream) => {
-            streamRef.current = stream;
-            const video = document.createElement('video');
-            video.style.display = 'none';
-            video.srcObject = stream;
-            video.onloadedmetadata = () => {
-              video.play();
-              videoRef.current = video; // Store ref only after ready
-              setScreenshots([]); // Clear previous screenshots
-              setViewState('recording'); // Move to recording view
-            };
-            document.body.appendChild(video);
-            
-            // Handle stream ending (e.g., user clicks "Stop sharing")
-            stream.getVideoTracks()[0].onended = () => {
-                console.log("Stream ended by user.");
-                cleanupMedia();
-                setViewState('empty');
-            };
+      captureFrame(); // Capture the first frame immediately
+      intervalRef.current = setInterval(captureFrame, 500); // Capture every 500ms
 
-          }).catch((err) => {
-            console.error('Error getting desktop stream:', err);
-            // Check for permission error (NotAllowedError is common)
-            if (err instanceof DOMException && err.name === 'NotAllowedError') {
-              setViewState('permissionNeeded');
-            } else {
-              // Handle other errors (e.g., constraints invalid)
-              setViewState('empty'); // Go back to empty for other errors
-            }
-          });
-        }
-      );
     } else {
-      console.warn('desktopCapture API not available');
-      alert('Desktop Capture API is not available. Ensure your extension has permissions.');
-      setViewState('empty');
+      console.error('chrome.tabs.captureVisibleTab API not available.');
+      setErrorMessage('Tab Capture API is not available. Ensure your extension has permissions and is running in a valid context.');
+      setViewState('error');
     }
-  }, [cleanupMedia]);
+  }, [cleanupCapture]);
 
   const handleCancelClick = () => {
-    cleanupMedia();
+    cleanupCapture();
     setViewState('empty');
   };
 
-  const handleDoneClick = (capturedScreenshots: string[]) => {
-    console.log(`Recording finished with ${capturedScreenshots.length} screenshots.`);
+  const handleDoneClick = () => {
+    console.log(`Recording finished with ${screenshots.length} screenshots.`);
     // TODO: Process/save screenshots
-    cleanupMedia();
+    cleanupCapture();
     setViewState('empty');
   };
 
-  const handlePermissionConfirmed = () => {
-    // User confirmed, try starting capture again
-    startCapture();
-  };
+  // Clean up interval on component unmount
+  useEffect(() => {
+    return () => {
+      cleanupCapture();
+    };
+  }, [cleanupCapture]);
 
   return (
     <div className="app">
       <header className="app__header">
-      🚜 Automate Boring Stuff
+        🚜 Automate Boring Stuff
       </header>
       <div className="app__body">
         <AnimatePresence mode="wait">
           {viewState === 'empty' && (
-            <EmptyView key="empty" onRecordClick={startCapture} />
+            <EmptyView key="empty" onRecordClick={startRecording} />
           )}
-          {viewState === 'permissionNeeded' && (
-            <PermissionGuideView key="permission" onConfirm={handlePermissionConfirmed} />
-          )}
-          {viewState === 'recording' && videoRef.current && (
-            <RecordingView
+          {/* Removed PermissionGuideView and 'permissionNeeded' state */}
+          {viewState === 'recording' && (
+             <RecordingView
               key="recording"
-              videoElement={videoRef.current}
+              screenshots={screenshots} // Pass screenshots directly
               onCancelClick={handleCancelClick}
-              onDoneClick={handleDoneClick}
+              onDoneClick={() => handleDoneClick()} // Pass collected screenshots on Done
             />
           )}
-           {viewState === 'capturing' && (
-             <motion.div key="capturing" initial={{opacity: 0}} animate={{opacity: 1}} exit={{opacity: 0}} style={{textAlign: 'center'}}>
-                Requesting permission...
+          {/* Removed 'capturing' state */}
+           {viewState === 'error' && (
+             <motion.div key="error" initial={{opacity: 0}} animate={{opacity: 1}} exit={{opacity: 0}} style={{textAlign: 'center', color: 'red'}}>
+                <p>Could not start recording:</p>
+                <p>{errorMessage || 'An unknown error occurred.'}</p>
+                <button className="button button--secondary" onClick={() => setViewState('empty')} style={{marginTop: '1rem'}}>
+                    Close
+                </button>
              </motion.div>
            )}
         </AnimatePresence>
       </div>
-      </div>
+    </div>
   )
 }
 
