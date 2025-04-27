@@ -19,6 +19,23 @@ router.get("/", async (ctx: Context) => {
     ctx.response.body = data;
 });
 
+router.get("/:email", async (ctx: Context) => {
+    const { email } = ctx.params;
+    const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('email', email)
+        .single();
+    console.log(data);
+
+    if (error) {
+        ctx.response.status = 500;
+        ctx.response.body = { error: "Failed to fetch user", message: error.message };
+        return;
+    }
+    ctx.response.body = data;
+});
+
 // GET /api/users/:id - Get a specific user by ID
 router.get("/:id", async (ctx: Context) => {
     const { id } = ctx.params;

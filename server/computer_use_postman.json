@@ -1,0 +1,68 @@
+{
+    "info": {
+        "name": "Computer Use API",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+        {
+            "name": "Function Call",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"markdown\": \"1. Go to Google\n2. Search for 'Anthropic Claude'\n3. Click on the first result\",\n  \"domHtml\": \"<!DOCTYPE html><html><head><title>Example Page</title></head><body><div class='search-bar'><input type='text' placeholder='Search...'></div><button>Search</button><div class='results'><div class='result'><a href='https://example.com'>Example Link</a></div></div></body></html>\",\n  \"instruction\": \"Go to Google\"\n}"
+                },
+                "url": {
+                    "raw": "http://localhost:8002/api/computer-use/function-call",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "8002",
+                    "path": [
+                        "api",
+                        "computer-use",
+                        "function-call"
+                    ]
+                },
+                "description": "Call Anthropic API to determine which DOM action to take"
+            }
+        },
+        {
+            "name": "Tool Result",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"toolUseId\": \"tool_123456\",\n  \"result\": { \"success\": true, \"message\": \"Navigation successful\" },\n  \"previousMessages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"What's the next step in this process?\"\n    },\n    {\n      \"role\": \"assistant\",\n      \"content\": [\n        {\n          \"type\": \"text\",\n          \"text\": \"I'll help you navigate to Google.\"\n        },\n        {\n          \"type\": \"tool_use\",\n          \"tool_use_id\": \"tool_123456\",\n          \"name\": \"navigate\",\n          \"input\": {\n            \"url\": \"https://www.google.com\"\n          }\n        }\n      ]\n    }\n  ]\n}"
+                },
+                "url": {
+                    "raw": "http://localhost:8002/api/computer-use/tool-result",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "8002",
+                    "path": [
+                        "api",
+                        "computer-use",
+                        "tool-result"
+                    ]
+                },
+                "description": "Send tool execution result back to Anthropic"
+            }
+        }
+    ]
+}

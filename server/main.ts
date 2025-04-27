@@ -20,7 +20,7 @@ import computeJobsRoutes from "./routes/compute_jobs.ts";
 import notificationsRoutes from "./routes/notifications.ts";
 // Placeholder routes for external integrations
 import vlmRoutes from "./routes/vlm.ts";
-// import computerUseRoutes from "./routes/computer_use.ts";
+import computerUseRoutes from "./routes/computer_use.ts";
 
 // Parse command line arguments
 const args = parse(Deno.args);
@@ -32,10 +32,18 @@ const router = new Router();
 
 // Middleware
 app.use(oakCors({
-    origin: "*", // TODO: Restrict in production (e.g., chrome-extension://<your-extension-id>)
-    methods: ["GET", "POST", "PUT", "DELETE"],
-    allowedHeaders: ["Content-Type", "Authorization"], // Add Authorization if using Supabase Auth tokens
+    // origin: "*", // Allow any origin (less secure, okay for dev)
+    origin: "chrome-extension://goleppcndgbgndgmbecpllecmdcldbad", // Specify your extension ID
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"], // Ensure OPTIONS is included for preflight
+    allowedHeaders: [
+        "Content-Type",
+        "Authorization",
+        "Accept", // Good practice to allow Accept header
+        "ngrok-skip-browser-warning" // Add the ngrok header
+    ],
     credentials: true,
+    // Optional: configure preflight max age
+    // preflightMaxAge: 86400,
 }));
 
 // Error handling middleware
@@ -44,7 +52,7 @@ app.use(async (ctx: Context, next: Next) => {
         await next();
     } catch (err: unknown) {
         const error = err as Error & { status?: number; expose?: boolean };
-        console.error(`Error during request ${ctx.request.method} ${ctx.request.url}:`, error);
+        console.error(`Error during request ${ctx.request.method} ${ctx.request.url}: `, error);
 
         ctx.response.status = error.status || 500;
         ctx.response.body = {
@@ -59,7 +67,7 @@ app.use(async (ctx: Context, next: Next) => {
     const start = Date.now();
     await next();
     const ms = Date.now() - start;
-    console.log(`${ctx.request.method} ${ctx.request.url.pathname}${ctx.request.url.search} - ${ctx.response.status} - ${ms}ms`);
+    console.log(`${ctx.request.method} ${ctx.request.url.pathname}${ctx.request.url.search} - ${ctx.response.status} - ${ms} ms`);
 });
 
 // Basic Routes
@@ -87,7 +95,7 @@ router.use("/api/compute_jobs", computeJobsRoutes.routes(), computeJobsRoutes.al
 router.use("/api/notifications", notificationsRoutes.routes(), notificationsRoutes.allowedMethods());
 // Placeholder routes
 router.use("/api/vlm", vlmRoutes.routes(), vlmRoutes.allowedMethods());
-// router.use("/api/computer-use", computerUseRoutes.routes(), computerUseRoutes.allowedMethods());
+router.use("/api/computer-use", computerUseRoutes.routes(), computerUseRoutes.allowedMethods());
 
 // Add router middleware
 app.use(router.routes());
@@ -101,4 +109,4 @@ app.addEventListener("listen", ({ hostname, port, secure }: { hostname: string; 
     console.log(`🔑 Supabase URL: ${env.SUPABASE_URL?.substring(0, 20)}...`); // Log partial URL
 });
 
-await app.listen({ port }); 
+await app.listen({ port });
