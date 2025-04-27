@@ -4,6 +4,21 @@ import { Script, ScriptStatus } from "../db/models.ts";
 
 const router = new Router();
 
+// GET /api/scripts/all - List all scripts
+router.get("/all", async (ctx: Context) => {
+    const { data, error } = await supabase
+        .from('scripts')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+    if (error) {
+        ctx.response.status = 500;
+        ctx.response.body = { error: "Failed to fetch scripts", message: error.message };
+        return;
+    }
+    ctx.response.body = data;
+});
+
 // GET /api/scripts?session_id=<uuid> - List scripts for a session
 router.get("/", async (ctx: Context) => {
     const sessionId = ctx.request.url.searchParams.get('session_id');

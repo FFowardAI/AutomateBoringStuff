@@ -16,13 +16,16 @@ const MODEL = "claude-3-5-haiku-latest";
 const DEFAULT_AUTOMATION_PROMPT = `
 Analyze these screenshots of a workflow or task and create a detailed automation script.
 For each step shown in the images (ordered chronologically):
-1. Identify what's happening in the interface
+1. Identify what's happening in the interface (check where the mouse cursor is)
 2. Note any clicks, inputs, or interactions
 3. Include specific values, text entries, or selections made
+4. Avoid doing general descriptions of the interface, only describe actions and specific parts of the interface that are relevant to the action
 
 Format your response as a clear step-by-step script that could be used to reproduce this exact workflow.
 Include any relevant metadata about the task context. Be specific about what to click, what to type, 
 and what the expected results should be.
+
+Always include the url of the page and the navigations that lead to the current page. Reply with an ordered list of steps.
 `;
 
 // POST /api/vlm/analyze - Analyze images with VLM and create script
