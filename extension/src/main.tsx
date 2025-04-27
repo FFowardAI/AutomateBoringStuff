@@ -20,6 +20,20 @@ interface User {
   // Add other relevant user fields from your API response
 }
 
+// Type for the expected response when creating a recording
+interface RecordingResponse {
+    id: string;
+    message?: string; // Add optional message for potential errors
+}
+
+// Add session response type
+interface SessionResponse {
+    id: string;
+    user_id: string;
+    // Add other fields returned by POST /api/sessions
+    message?: string;
+}
+
 // Combine view states
 type ViewState = 'authenticating' | 'authRequired' | 'loading' | 'empty' | 'recording' | 'error';
 
@@ -33,22 +47,30 @@ const App: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [items, setItems] = useState<string[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [recordingId, setRecordingId] = useState<string | null>(null); // State for backend recording ID
+  const [sessionId, setSessionId] = useState<string | null>(null); // State for backend session ID
 
   // --- Check Local Storage for Auth Details --- 
   useEffect(() => {
     const checkStoredAuth = async () => {
+      console.log("Checking local storage for auth details...");
       try {
-        // Check if user details exist in local storage
-        const storedData = await chrome.storage.local.get(['userName', 'userEmail']);
+        // Check if user ID, name, and email exist in local storage
+        const storedData = await chrome.storage.local.get(['userId', 'userName', 'userEmail']);
         
-        if (storedData.userName && storedData.userEmail) {
-          console.log("Found stored user details, assuming logged in:", storedData);
-          // Store details in state if needed later
-          setCurrentUser({ name: storedData.userName, email: storedData.userEmail, id: null }); // ID is unknown here
-          // Proceed directly to loading app state
-          setViewState('loading'); 
+        if (storedData.userId && storedData.userName && storedData.userEmail) {
+          console.log("Found stored user ID, name, and email:", storedData);
+          // Create the user object directly from storage
+          const user: User = { 
+              id: storedData.userId, 
+              name: storedData.userName, 
+              email: storedData.userEmail 
+          };
+          setCurrentUser(user); // Set the current user state
+          // User details found, now try to create/get session using the stored ID
+          await createOrGetSession(user); 
         } else {
-          console.log("No stored user details found.");
+          console.log("Stored user details incomplete or missing. Requiring auth.");
           // Require login/signup via AuthView
           setViewState('authRequired'); 
         }
@@ -93,7 +115,7 @@ const App: React.FC = () => {
          setViewState('error');
       }
     });
-  }, [viewState]); // Rerun if viewState becomes 'loading'
+  }, [viewState]);
 
   const handleConsume = useCallback(() => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs: any[]) => {
@@ -165,52 +187,159 @@ const App: React.FC = () => {
     // Dependencies: viewState ensures listener re-registers if needed, fetchState included
   }, [viewState, fetchStateFromBackground]); 
 
+  // --- Helper Functions --- 
+
+  // Function to create a backend session
+  const createOrGetSession = async (user: User | null) => {
+      console.log("Creating or getting session for user:", user);
+      if (!user || !user.id) {
+          console.error("Cannot create session: User ID is missing.");
+          setErrorMessage("User information incomplete. Cannot start session. Please log in.");
+          setViewState('authRequired'); 
+          return;
+      }
+
+      console.log("Attempting to create backend session for user:", user.id);
+      try {
+          const response = await fetch(`${API_BASE_URL}/api/sessions`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                  user_id: user.id,
+                  context: "Started from Chrome Extension"
+              })
+          });
+
+          const data: SessionResponse = await response.json();
+
+          if (!response.ok) {
+              throw new Error(data?.message || `API Error: ${response.status}`);
+          }
+          if (!data.id) {
+              throw new Error("Backend did not return a session ID.");
+          }
+
+          console.log("Backend session created successfully. ID:", data.id);
+          setSessionId(data.id); 
+          setViewState('loading'); 
+
+      } catch (error: any) {
+          console.error("Error creating backend session:", error);
+          setErrorMessage(`Failed to create session: ${error.message}`);
+          setViewState('error'); 
+      }
+  };
+
   // --- Event Handlers --- 
 
-  const handleAuthSuccess = (userData: User) => {
+  const handleAuthSuccess = async (userData: User) => {
     console.log("Authentication successful in parent:", userData);
-    setCurrentUser(userData); // Store user data
-    setViewState('loading'); // Move to loading the recording state
+    setCurrentUser(userData); 
+    // Now attempt to create the session
+    await createOrGetSession(userData);
   };
 
   const handleRecordClick = () => {
-    console.log("Sending start_recording message...");
-    chrome.runtime.sendMessage({ type: "start_recording" }, (response) => {
+    // Session ID is now required to create a recording
+    if (!sessionId) {
+        console.error("Cannot start recording: Session ID not available.");
+        setErrorMessage("Session not initialized. Please restart the extension or log in again.");
+        setViewState('error');
+        return;
+    }
+    
+    console.log("Sending start_recording message to background...");
+    chrome.runtime.sendMessage({ type: "start_recording" }, async (response) => {
        if (chrome.runtime.lastError || (response && response.error)) {
-         console.error("Error starting recording:", chrome.runtime.lastError?.message || response?.error);
-         setErrorMessage(`Failed to start: ${chrome.runtime.lastError?.message || response?.error}`);
+         const errorMsg = chrome.runtime.lastError?.message || (response as {error: string})?.error || 'Unknown background start error';
+         console.error("Error starting background recording:", errorMsg);
+         setErrorMessage(`Failed to start local recording: ${errorMsg}`);
          setViewState('error');
-       } else {
-         console.log("Start recording request acknowledged.");
-       }
+         return; 
+       } 
+         
+       console.log("Background recording started. Creating backend recording entry...");
+       try {
+            // Use sessionId, add start_time
+            const apiResponse = await fetch(`${API_BASE_URL}/api/recordings`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  session_id: sessionId, // Use the stored session ID
+                  start_time: new Date().toISOString(),
+                })
+            });
+
+            const data: RecordingResponse = await apiResponse.json();
+
+            if (!apiResponse.ok) {
+                throw new Error(data?.message || `API Error: ${apiResponse.status}`);
+            }
+            if (!data.id) {
+                throw new Error("Backend did not return a recording ID.");
+            }
+
+            console.log("Backend recording created successfully. ID:", data.id);
+            setRecordingId(data.id); 
+
+        } catch (apiError: any) {
+            console.error("Error creating backend recording:", apiError);
+            setErrorMessage(`Failed to create backend recording: ${apiError.message}`);
+            setViewState('error'); 
+        }
     });
   };
 
   const handleCancelClick = () => {
     console.log("Sending stop_recording message (Cancel)...");
-    chrome.runtime.sendMessage({ type: "stop_recording" }, (response) => {
-        if (chrome.runtime.lastError || (response && response.error)) {
-          console.error("Error stopping recording (cancel):", chrome.runtime.lastError?.message || response?.error);
-          setErrorMessage(`Failed to stop cleanly: ${chrome.runtime.lastError?.message || response?.error}`);
-          setViewState('empty'); 
-        } else {
-          console.log("Stop recording request acknowledged (Cancel).");
-        }
-    });
-    setViewState('empty');
+    // Tell background to stop local recording
+    chrome.runtime.sendMessage({ type: "stop_recording" }); 
+    // Clear local recording ID state, don't finalize backend record
+    setRecordingId(null); 
+    // UI update to 'empty' will come from background listener
+    // setViewState('empty'); // Or set immediately for responsiveness
   };
 
-  const handleDoneClick = () => {
-    console.log("Sending stop_recording message (Done)...");
-    chrome.runtime.sendMessage({ type: "stop_recording" }, (response: BackgroundState | {error: string}) => {
-        if (chrome.runtime.lastError || (response && 'error' in response)) {
-          console.error("Error stopping recording (done):", chrome.runtime.lastError?.message || (response as {error: string}).error);
-          setErrorMessage(`Failed to stop cleanly: ${chrome.runtime.lastError?.message || (response as {error: string}).error}`);
-          setViewState('empty');
-        } else if (response) {
-          console.log(`Recording finished with ${response.screenshots?.length || 0} screenshots.`);
+  const handleDoneClick = async () => {
+    const currentRecordingId = recordingId;
+    console.log(`Sending stop_recording message (Done) for recording ID: ${currentRecordingId}...`);
+    
+    // 1. Tell background to stop local recording
+    chrome.runtime.sendMessage({ type: "stop_recording" });
+    // It might be better to wait for the background stop confirmation,
+    // but let's keep it simple for now.
+
+    // 2. Finalize backend recording (if we have an ID)
+    if (currentRecordingId) {
+        console.log("Finalizing backend recording...");
+        setRecordingId(null);
+        try {
+            const finalizeTime = new Date().toISOString();
+            const apiResponse = await fetch(`${API_BASE_URL}/api/recordings/${currentRecordingId}/finalize`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ end_time: finalizeTime })
+            });
+
+            if (!apiResponse.ok) {
+                let errorData;
+                try { errorData = await apiResponse.json(); } catch { /* ignore */ }
+                throw new Error(errorData?.message || `API Error: ${apiResponse.status}`);
+            }
+
+            console.log("Backend recording finalized successfully.");
+        } catch (apiError: any) {
+            console.error("Error finalizing backend recording:", apiError);
+            setErrorMessage(`Failed to finalize backend recording: ${apiError.message} (ID: ${currentRecordingId})`);
+             setTimeout(() => setErrorMessage(null), 5000);
         }
-    });
+    } else {
+        console.warn("Done clicked, but no recording ID was found.");
+         setRecordingId(null);
+    }
+    
+    // Set view state to empty regardless of finalize outcome (local recording stopped)
+    // The background listener might also do this, but setting it here provides faster feedback.
     setViewState('empty');
   };
   
@@ -221,7 +350,8 @@ const App: React.FC = () => {
     <div className="app">
       <header className="app__header">
         🚜 Automate Boring Stuff
-        {/* TODO: Optionally show user info or logout button here if currentUser */} 
+        {/* Display error message if any (could be styled better) */}
+        {errorMessage && <p style={{ color: 'orange', fontSize: '0.8em', margin: '0 5px' }}>{errorMessage}</p>}
       </header>
       <div className="app__body">
         <AnimatePresence mode="wait">
@@ -243,7 +373,7 @@ const App: React.FC = () => {
              </motion.div>
           )}
           {viewState === 'empty' && (
-            <EmptyView key="empty" onRecordClick={handleRecordClick} onRandomViewClick={() => {}} onRandomViewClick={handleConsume} />
+            <EmptyView key="empty" onRecordClick={handleRecordClick} onRandomViewClick={handleConsume} />
           )}
           {viewState === 'recording' && (
              <RecordingView
