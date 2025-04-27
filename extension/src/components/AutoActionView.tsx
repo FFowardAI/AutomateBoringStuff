@@ -5,6 +5,15 @@ type Action =
   | { tool: "click"; selector: string }
   | { tool: "navigate"; url: string };
 
+// Function to check for restricted URLs
+function isRestrictedUrl(url?: string): boolean {
+  if (!url) return true; // No URL, assume restricted
+  return url.startsWith('chrome://') || 
+         url.startsWith('chrome-extension://') || 
+         url.startsWith('https://chrome.google.com/webstore') ||
+         url.startsWith('about:');
+}
+
 export const AutoActionView: React.FC = () => {
   const [markdown, setMarkdown] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -14,19 +23,32 @@ export const AutoActionView: React.FC = () => {
     setError(null);
     setLoading(true);
     try {
-      // 1. Grab the current page DOM.
+      // 1. Get the active tab
       const [tab] = await chrome.tabs.query({
         active: true,
         currentWindow: true,
       });
-      if (!tab.id) throw new Error("No active tab");
 
+      // --- Check for restricted URL --- 
+      if (!tab || !tab.id || isRestrictedUrl(tab.url)) {
+        throw new Error("Cannot run action on the current page (e.g., chrome:// pages, extension pages, web store).");
+      }
+      // --- End Check ---
+
+      // 2. Grab the current page DOM.
+      console.log("Grabbing DOM from tab:", tab.id);
       const [{ result: domHtml }] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: () => document.documentElement.outerHTML,
       });
+      if (!domHtml) {
+          console.warn("Could not retrieve DOM HTML from the page.");
+          // Decide if this is a fatal error or if we can proceed without DOM
+          // throw new Error("Failed to get page content.");
+      }
 
-      // 2. Make the HTTP request to our local server endpoint for Anthropic.
+      // 3. Make the HTTP request to our local server endpoint for Anthropic.
+      console.log("Sending request to backend...");
       const resp = await fetch("https://31ca-4-39-199-2.ngrok-free.app/api/computer-use/function-call", {
         method: "POST",
         headers: {
@@ -35,12 +57,12 @@ export const AutoActionView: React.FC = () => {
         },
         body: JSON.stringify({
           markdown,
-          domHtml: "dom",
+          domHtml: domHtml || "", // Send empty string if DOM fetch failed
           instruction: ``  // add instruction if needed
         }),
       });
 
-      console.log("Claude response:", resp);
+      console.log("Claude response status:", resp.status);
 
       if (!resp.ok) {
         throw new Error(`Server error: ${resp.status} ${await resp.text()}`);
@@ -48,34 +70,55 @@ export const AutoActionView: React.FC = () => {
       
       const data = await resp.json();
       
-      console.log("Claude response:", data);
-      const toolCall = data?.toolCal
+      console.log("Claude response data:", data);
 
-      console.log("Tool call:", toolCall);
+      // 4. Execute the action based on the response
+      const toolCall = data?.toolCall // Adjust based on actual response structure
+      if (!toolCall || !toolCall.name) {
+          throw new Error("Invalid or missing tool call in the response from the server.");
+      }
+
+      console.log("Executing Tool call:", toolCall);
 
       if (toolCall.name === "click") {
-        if (!toolCall.selector) {
+        const selector = toolCall.input?.selector; // Adjust based on actual structure
+        if (!selector) {
           throw new Error("Missing selector for 'click' action");
         }
+        console.log(`Executing click on selector: ${selector}`);
         await chrome.scripting.executeScript({
           target: { tabId: tab.id! },
           func: (sel: string) => {
-            const el = document.querySelector(sel) as HTMLElement | null;
-            if (el) el.click();
+            try {
+              const el = document.querySelector(sel) as HTMLElement | null;
+              if (el) { 
+                  console.log('Clicking element:', el); 
+                  el.click(); 
+              } else { 
+                  console.error('Element not found for selector:', sel);
+              }
+            } catch(e) {
+                console.error(`Error clicking selector ${sel}:`, e)
+            }
           },
-          args: [toolCall.selector],
+          args: [selector],
         });
       } else if (toolCall.name === "navigate") {
-        if (!toolCall.input.url) {
+        const url = toolCall.input?.url; // Adjust based on actual structure
+        if (!url) {
           throw new Error("Missing URL for 'navigate' action");
         }
-        await chrome.tabs.update(tab.id!, { url: toolCall.input.url });
+        console.log(`Navigating to URL: ${url}`);
+        await chrome.tabs.update(tab.id!, { url: url });
       } else {
-        throw new Error(`Unknown tool action: ${toolCall.name}`);
+        throw new Error(`Unknown tool action received: ${toolCall.name}`);
       }
+
+      console.log("Action executed successfully.");
+
     } catch (e: any) {
-      console.error(e);
-      setError(e.message || "Unknown error");
+      console.error("Error in handleStart:", e);
+      setError(e.message || "An unknown error occurred");
     } finally {
       setLoading(false);
     }

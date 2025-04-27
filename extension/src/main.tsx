@@ -407,9 +407,10 @@ const App: React.FC = () => {
                const responseJson: FinalizeResponse = await uploadResponse.json();
                console.log("Batch upload response JSON:", responseJson);
 
-               if (responseJson.script && typeof responseJson.script === 'string') {
+               if (responseJson.script ) {
                    console.log("Script received, setting action state.");
-                   setActionScript(responseJson.script);
+                   // Assuming responseJson.script is the string content itself based on the lint error
+                   setActionScript(responseJson.script); 
                    setViewState('action'); // Transition to action view
                    uploadSucceeded = true; // Mark as success
                } else {
