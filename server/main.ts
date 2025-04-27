@@ -32,8 +32,8 @@ const router = new Router();
 
 // Middleware
 app.use(oakCors({
-    // origin: "*", // Allow any origin (less secure, okay for dev)
-    origin: "chrome-extension://goleppcndgbgndgmbecpllecmdcldbad", // Specify your extension ID
+    origin: "*", // Allow any origin (less secure, okay for dev)
+    // origin: "chrome-extension://goleppcndgbgndgmbecpllecmdcldbad", // Specify your extension ID
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"], // Ensure OPTIONS is included for preflight
     allowedHeaders: [
         "Content-Type",

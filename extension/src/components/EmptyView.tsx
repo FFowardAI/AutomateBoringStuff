@@ -4,11 +4,15 @@ import { motion } from 'framer-motion'
 interface EmptyViewProps {
   onRecordClick: () => void
   onRandomViewClick: () => void
+  onBrowseScriptsClick?: () => void
+  disabled?: boolean
 }
 
 export const EmptyView: React.FC<EmptyViewProps> = ({
   onRecordClick,
   onRandomViewClick,
+  onBrowseScriptsClick,
+  disabled
 }) => (
   <motion.div
     key="initial"
@@ -24,14 +28,30 @@ export const EmptyView: React.FC<EmptyViewProps> = ({
       <li className="roadmap__item">3. never do it again</li>
     </ul>
 
-    <button className="button button--primary" onClick={onRecordClick}>
+    <button
+      className="button button--primary"
+      onClick={onRecordClick}
+      disabled={disabled}
+    >
       Record
     </button>
     <button
       className="button button--secondary"
-      onClick={onRandomViewClick}           // ← new
+      onClick={onRandomViewClick}
+      disabled={disabled}
     >
       Random‑ID Click View
     </button>
+
+    {onBrowseScriptsClick && (
+      <button
+        className="button button--secondary"
+        onClick={onBrowseScriptsClick}
+        disabled={disabled}
+        style={{ marginTop: '0.5rem' }}
+      >
+        Browse Scripts
+      </button>
+    )}
   </motion.div>
 )
