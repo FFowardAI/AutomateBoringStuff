@@ -5,6 +5,7 @@ import './main.css'
 import { EmptyView } from './components/EmptyView'
 import { RecordingView } from './components/RecordingView'
 import { AuthView } from './components/AuthView'
+import { AutoActionView } from './components/AutoActionView'
 
 // Define expected state structure from background
 interface BackgroundState {
@@ -34,12 +35,42 @@ interface SessionResponse {
     message?: string;
 }
 
+// Add type for the finalize endpoint response
+interface FinalizeResponse {
+    script?: string; // Make script optional in case API doesn't always return it
+    message?: string;
+    // Add other potential fields
+}
+
 // Combine view states
-type ViewState = 'authenticating' | 'authRequired' | 'loading' | 'empty' | 'recording' | 'error';
+type ViewState = 'authenticating' | 'authRequired' | 'loading' | 'empty' | 'recording' | 'uploading' | 'error' | 'action';
 
 const API_BASE_URL = "https://31ca-4-39-199-2.ngrok-free.app"; // Define your backend URL
 // AUTH_COOKIE_NAME is no longer checked here, but might still be relevant for backend interactions
 // const AUTH_COOKIE_NAME = "auth_session";
+
+// --- Helper Functions --- 
+
+// Helper to convert data URL to Blob
+function dataURLtoBlob(dataurl: string): Blob | null { 
+    try {
+        const arr = dataurl.split(',');
+        if (!arr[0]) return null;
+        const mimeMatch = arr[0].match(/:(.*?);/);
+        if (!mimeMatch || !mimeMatch[1]) return null;
+        const mime = mimeMatch[1];
+        const bstr = atob(arr[arr.length - 1]); // Use arr.length - 1 to handle potential commas in data
+        let n = bstr.length;
+        const u8arr = new Uint8Array(n);
+        while(n--){
+            u8arr[n] = bstr.charCodeAt(n);
+        }
+        return new Blob([u8arr], {type:mime});
+    } catch (e) {
+        console.error("Error converting data URL to blob:", e);
+        return null;
+    }
+}
 
 const App: React.FC = () => {
   const [viewState, setViewState] = useState<ViewState>('authenticating'); // Start in authenticating state
@@ -49,6 +80,8 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [recordingId, setRecordingId] = useState<string | null>(null); // State for backend recording ID
   const [sessionId, setSessionId] = useState<string | null>(null); // State for backend session ID
+  const [isLoading, setIsLoading] = useState<boolean>(false); // Add loading state for uploads
+  const [actionScript, setActionScript] = useState<string | null>(null); // State for the script content
 
   // --- Check Local Storage for Auth Details --- 
   useEffect(() => {
@@ -231,7 +264,6 @@ const App: React.FC = () => {
   };
 
   // --- Event Handlers --- 
-
   const handleAuthSuccess = async (userData: User) => {
     console.log("Authentication successful in parent:", userData);
     setCurrentUser(userData); 
@@ -263,7 +295,7 @@ const App: React.FC = () => {
             // Use sessionId, add start_time
             const apiResponse = await fetch(`${API_BASE_URL}/api/recordings`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
                 body: JSON.stringify({
                   session_id: sessionId, // Use the stored session ID
                   start_time: new Date().toISOString(),
@@ -302,45 +334,104 @@ const App: React.FC = () => {
 
   const handleDoneClick = async () => {
     const currentRecordingId = recordingId;
-    console.log(`Sending stop_recording message (Done) for recording ID: ${currentRecordingId}...`);
+    const finalScreenshots = [...screenshots];
     
-    // 1. Tell background to stop local recording
+    console.log(`Stopping recording, preparing upload for ID: ${currentRecordingId}...`);
+    
     chrome.runtime.sendMessage({ type: "stop_recording" });
-    // It might be better to wait for the background stop confirmation,
-    // but let's keep it simple for now.
+    setRecordingId(null);
+    setScreenshots([]);
+    setActionScript(null); // Clear previous script
 
-    // 2. Finalize backend recording (if we have an ID)
-    if (currentRecordingId) {
-        console.log("Finalizing backend recording...");
-        setRecordingId(null);
-        try {
-            const finalizeTime = new Date().toISOString();
-            const apiResponse = await fetch(`${API_BASE_URL}/api/recordings/${currentRecordingId}/finalize`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ end_time: finalizeTime })
-            });
+    if (!currentRecordingId) {
+        console.warn("Done clicked, no recording ID. Cannot upload.");
+        setViewState('empty');
+        return;
+    }
+    if (finalScreenshots.length === 0) {
+        console.log("No screenshots captured. Skipping upload.");
+        setViewState('empty');
+        return;
+    }
 
-            if (!apiResponse.ok) {
-                let errorData;
-                try { errorData = await apiResponse.json(); } catch { /* ignore */ }
-                throw new Error(errorData?.message || `API Error: ${apiResponse.status}`);
-            }
+    setIsLoading(true);
+    setViewState('uploading');
 
-            console.log("Backend recording finalized successfully.");
-        } catch (apiError: any) {
-            console.error("Error finalizing backend recording:", apiError);
-            setErrorMessage(`Failed to finalize backend recording: ${apiError.message} (ID: ${currentRecordingId})`);
-             setTimeout(() => setErrorMessage(null), 5000);
+    const formData = new FormData();
+    let conversionFailures = 0;
+    let uploadSucceeded = false; // Flag to track success
+
+    console.log("Converting screenshots...");
+    for (let i = 0; i < finalScreenshots.length; i++) {
+        const screenshotDataUrl = finalScreenshots[i];
+        const blob = dataURLtoBlob(screenshotDataUrl);
+
+        if (!blob) {
+            console.error(`Failed to convert screenshot ${i + 1} to Blob.`);
+            conversionFailures++;
+            continue;
         }
-    } else {
-        console.warn("Done clicked, but no recording ID was found.");
-         setRecordingId(null);
+        formData.append('files', blob, `screenshot_${i + 1}.png`);
+    }
+
+    if (conversionFailures > 0) {
+        console.warn(`Skipped ${conversionFailures} screenshots due to conversion errors.`);
     }
     
-    // Set view state to empty regardless of finalize outcome (local recording stopped)
-    // The background listener might also do this, but setting it here provides faster feedback.
-    setViewState('empty');
+    const filesToUploadCount = formData.getAll('files').length;
+    if (filesToUploadCount === 0) {
+        console.warn("No valid screenshots to upload after conversion.");
+        setErrorMessage("Failed to process screenshots for upload.");
+        // Skip fetch, go directly to finally block (which now sets state based on uploadSucceeded)
+        throw new Error("No valid files to upload"); // Throw to go to catch block
+    } else {
+        // Send the single POST request with all files
+        console.log(`Uploading ${filesToUploadCount} screenshots...`);
+        try {
+            const uploadResponse = await fetch(`${API_BASE_URL}/api/recordings/${currentRecordingId}/finalize`, {
+                method: 'POST',
+                headers: { 
+                    'ngrok-skip-browser-warning': 'true' 
+                },
+                body: formData, 
+            });
+
+            console.log("Batch upload response status:", uploadResponse.status);
+
+            if (!uploadResponse.ok) {
+                let errorText = `Status: ${uploadResponse.status}`;
+                try { errorText = await uploadResponse.text(); } catch { /* ignore */ }
+                console.error(`Failed to upload screenshot batch. Error: ${errorText}`);
+                throw new Error(`Batch upload failed: ${errorText}`);
+            } else {
+               const responseJson: FinalizeResponse = await uploadResponse.json();
+               console.log("Batch upload response JSON:", responseJson);
+
+               if (responseJson.script && typeof responseJson.script === 'string') {
+                   console.log("Script received, setting action state.");
+                   setActionScript(responseJson.script);
+                   setViewState('action'); // Transition to action view
+                   uploadSucceeded = true; // Mark as success
+               } else {
+                   console.warn("Upload succeeded, but no valid script found in response.");
+                   setErrorMessage("Processing complete, but failed to retrieve action script.");
+                   // Decide: go to empty or error? Let's go to error for clarity.
+                   setViewState('error'); 
+               }
+            }
+        } catch (uploadError: any) {
+            console.error(`Network or server error during batch upload:`, uploadError);
+            setErrorMessage(`Upload failed: ${uploadError.message}`);
+            // Go to error state on failure
+            setViewState('error'); 
+        } finally {
+            setIsLoading(false); // Stop loading indicator
+            // Only set to empty if upload didn't succeed AND we are not in error state
+            if (!uploadSucceeded && viewState !== 'error' && viewState !== 'action') {
+               setViewState('empty'); 
+            } 
+        }
+    }
   };
   
   // TODO: Add a Logout handler that clears the cookie and resets state
@@ -350,6 +441,8 @@ const App: React.FC = () => {
     <div className="app">
       <header className="app__header">
         🚜 Automate Boring Stuff
+        {/* Show loading state */}
+        {isLoading && <span style={{ marginLeft: '10px', fontStyle: 'italic' }}>(Uploading...)</span>}
         {/* Display error message if any (could be styled better) */}
         {errorMessage && <p style={{ color: 'orange', fontSize: '0.8em', margin: '0 5px' }}>{errorMessage}</p>}
       </header>
@@ -367,13 +460,30 @@ const App: React.FC = () => {
               onAuthSuccess={handleAuthSuccess} 
             />
           )}
-          {viewState === 'loading' && (
+          {viewState === 'loading' && !isLoading && ( // Only show if not also doing uploads
              <motion.div key="loading" initial={{opacity: 0}} animate={{opacity: 1}} exit={{opacity: 0}} style={{textAlign: 'center'}}>
                 Loading recording state...
              </motion.div>
           )}
+          {viewState === 'uploading' && (
+             <motion.div 
+                key="uploading" 
+                initial={{ opacity: 0 }} 
+                animate={{ opacity: 1 }} 
+                exit={{ opacity: 0 }} 
+                style={{textAlign: 'center', padding: '20px'}}
+              >
+                <p>Uploading screenshots...</p>
+                {/* You could add a spinner component here */} 
+             </motion.div>
+          )}
           {viewState === 'empty' && (
-            <EmptyView key="empty" onRecordClick={handleRecordClick} onRandomViewClick={handleConsume} />
+            <EmptyView 
+              key="empty" 
+              onRecordClick={handleRecordClick} 
+              onRandomViewClick={handleConsume} 
+              disabled={isLoading} // Disable button during upload
+            />
           )}
           {viewState === 'recording' && (
              <RecordingView
@@ -381,8 +491,15 @@ const App: React.FC = () => {
               screenshots={screenshots}
               onCancelClick={handleCancelClick}
               onDoneClick={handleDoneClick}
+              disabled={isLoading} // Disable buttons during upload
             />
           )}
+          {viewState === 'action' && actionScript && ( // Only render if script exists
+             <AutoActionView
+               key="action"
+               markdown={actionScript} // Pass the script content
+             />
+           )}
            {viewState === 'error' && (
              <motion.div key="error" initial={{opacity: 0}} animate={{opacity: 1}} exit={{opacity: 0}} style={{textAlign: 'center', color: 'red'}}>
                 <p>An error occurred:</p>
