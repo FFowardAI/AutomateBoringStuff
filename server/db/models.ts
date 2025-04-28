@@ -44,6 +44,8 @@ export interface Script {
     content: string;
     status: ScriptStatus;
     created_at: string; // TIMESTAMPTZ
+    is_structured?: boolean; // Whether content is in valid JSON structure
+    structured_data?: Record<string, any> | null; // Parsed JSON structure if valid
 }
 
 // Corresponds to the 'activations' table
