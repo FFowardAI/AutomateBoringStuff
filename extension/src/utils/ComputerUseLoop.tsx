@@ -51,7 +51,7 @@ async function executeTool(tabId: number, tool: ToolCall) {
  * 1. Add a new function to take a screenshot of the current tab and send it to the server.
  * 2. Modify the server to accept the screenshot and return the coordinates of the element to click when calling "click".
  * 3. Modify the `executeTool` function to use the coordinates returned by the server to click on the element.
- * 4. Modify the `samplingLoop` function to send the screenshot to the server instead of the DOM HTML and instruction.
+ * 4. Modify the `samplingLoop` function to send the screenshot and instructions to the server instead of the DOM HTML.
  */
 export async function samplingLoop(
   tabId: number,
