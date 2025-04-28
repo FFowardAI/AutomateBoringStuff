@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 
 // defines the shape of a single action returned by Claude
 type Action =
@@ -151,9 +151,32 @@ function extractInteractiveElements(html: string): string {
     }
 }
 
+// --- Interfaces for Parsed Script ---
+interface ScriptMetadata {
+    title: string;
+    url: string;
+    totalSteps: number;
+}
+
+interface ScriptStep {
+    stepNumber: number;
+    action: "Navigate" | "Click" | "Type" | string; // Allow other actions
+    target: string;
+    value: string | null;
+    url?: string; // Optional URL context for the step
+    expectedResult?: string; // Optional expected result
+}
+
+interface AutomationScript {
+    metadata: ScriptMetadata;
+    steps: ScriptStep[];
+    summary: string;
+}
+
+// --- Component Props ---
 interface AutoActionViewProps {
-    markdown: string;
-    onShowAllScripts?: () => void; // New prop to handle showing all scripts
+    markdown: string; // Contains the JSON string
+    onShowAllScripts?: () => void;
 }
 
 export const AutoActionView: React.FC<AutoActionViewProps> = ({
@@ -162,6 +185,41 @@ export const AutoActionView: React.FC<AutoActionViewProps> = ({
 }) => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [parsedScript, setParsedScript] = useState<AutomationScript | null>(null);
+    const [parseError, setParseError] = useState<string | null>(null);
+
+    // Parse the markdown (JSON string) prop when it changes
+    useEffect(() => {
+        if (markdown && typeof markdown === 'string') {
+            try {
+                const scriptObject: AutomationScript = JSON.parse(markdown);
+                // Basic validation (can be expanded)
+                if (!scriptObject.metadata || !scriptObject.steps || !scriptObject.summary) {
+                    throw new Error("Invalid script structure: Missing required fields (metadata, steps, summary).");
+                }
+                setParsedScript(scriptObject);
+                setParseError(null); // Clear previous errors
+            } catch (e: any) {
+                console.error("Failed to parse action script JSON:", e);
+                setParseError(`Failed to read script: ${e.message}`);
+                setParsedScript(null); // Clear parsed script on error
+            }
+        } else {
+            // Handle cases where markdown prop is empty or invalid
+            setParsedScript(null);
+            setParseError("No script content received.");
+        }
+    }, [markdown]); // Rerun effect if markdown prop changes
+
+    // Helper to get an icon based on action type
+    const getActionIcon = (action: string) => {
+        switch (action.toLowerCase()) {
+            case 'navigate': return '🌐'; // Globe
+            case 'click': return '🖱️'; // Mouse
+            case 'type': return '⌨️'; // Keyboard
+            default: return '⚙️'; // Gear for unknown
+        }
+    };
 
     const handleStart = async () => {
         setError(null);
@@ -284,49 +342,63 @@ export const AutoActionView: React.FC<AutoActionViewProps> = ({
     };
 
     return (
-        <div style={{ padding: "1rem" }}>
-            <h4>Auto‑Action Runner</h4>
-            <textarea
-                value={markdown}
-                placeholder="Paste your markdown todo list here…"
-                style={{ width: "100%", height: 120 }}
-                readOnly
-            />
-            <div style={{
-                display: "flex",
-                justifyContent: "space-between",
-                marginTop: "1rem"
-            }}>
-                <button
-                    className="button button--primary"
-                    onClick={handleStart}
-                    disabled={loading || !markdown || typeof markdown !== 'string' || !markdown.trim()}
-                >
-                    {loading ? "Running…" : "Run First Step"}
-                </button>
-
-                {onShowAllScripts && (
-                    <button
-                        className="button button--secondary"
-                        onClick={onShowAllScripts}
-                        disabled={loading}
-                    >
-                        Show All Scripts
-                    </button>
-                )}
-            </div>
-            {loading && (
-                <div style={{
-                    marginTop: "1rem",
-                    padding: "0.5rem",
-                    backgroundColor: "#f8f9fa",
-                    borderRadius: "4px",
-                    textAlign: "center"
-                }}>
-                    <p>Processing page content and executing automation...</p>
-                </div>
+        <div style={{ padding: "1rem", fontFamily: 'sans-serif' }}>
+            {parseError && (
+                <p style={{ color: 'red' }}>Error: {parseError}</p>
             )}
-            {error && <p style={{ color: "red", marginTop: "0.5rem" }}>Error: {error}</p>}
+            {!parsedScript && !parseError && (
+                <p>Loading script...</p> // Show loading if no script and no error yet
+            )}
+            {parsedScript && (
+                <>
+                    <h4 style={{ marginTop: 0, marginBottom: '0.5rem' }}>{parsedScript.metadata.title}</h4>
+                    <p style={{ fontSize: '0.9em', color: '#555', marginTop: 0, marginBottom: '0.5rem' }}>
+                        Target URL: <a href={parsedScript.metadata.url} target="_blank" rel="noopener noreferrer">{parsedScript.metadata.url}</a>
+                    </p>
+                    <p style={{ fontSize: '0.9em', color: '#555', marginTop: 0, marginBottom: '1.5rem' }}>{parsedScript.summary}</p>
+
+                    <h5 style={{ marginBottom: '0.75rem' }}>Steps ({parsedScript.metadata.totalSteps}):</h5>
+                    <ul style={{ listStyle: 'none', paddingLeft: 0, margin: 0 }}>
+                        {parsedScript.steps.map((step) => (
+                            <li key={step.stepNumber} style={{
+                                marginBottom: '1rem',
+                                padding: '0.75rem',
+                                border: '1px solid #e0e0e0',
+                                borderRadius: '4px',
+                                backgroundColor: '#f9f9f9'
+                            }}>
+                                <div style={{ fontWeight: 'bold', marginBottom: '0.3rem' }}>
+                                    Step {step.stepNumber}: {getActionIcon(step.action)} {step.action}
+                                </div>
+                                <div style={{ fontSize: '0.9em', color: '#333' }}>
+                                    <span style={{ color: '#777' }}>Target:</span> {step.target}
+                                    {step.value !== null && (
+                                        <span style={{ display: 'block', marginTop: '0.2rem' }}>
+                                            <span style={{ color: '#777' }}>Value:</span> {step.value}
+                                        </span>
+                                    )}
+                                </div>
+                            </li>
+                        ))}
+                    </ul>
+
+                    <div style={{
+                        display: "flex",
+                        justifyContent: "flex-end",
+                        marginTop: "1.5rem"
+                    }}>
+                        {/* Keep the "Show All Scripts" button */}
+                        {onShowAllScripts && (
+                            <button
+                                className="button button--secondary"
+                                onClick={onShowAllScripts}
+                            >
+                                Show All Scripts
+                            </button>
+                        )}
+                    </div>
+                </>
+            )}
         </div>
     );
 };

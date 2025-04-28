@@ -39,9 +39,10 @@ interface SessionResponse {
 
 // Add type for the finalize endpoint response
 interface FinalizeResponse {
-  script?: string; // Make script optional in case API doesn't always return it
+  script?: {
+    content: string;
+  }; 
   message?: string;
-  // Add other potential fields
 }
 
 // Script type
@@ -439,13 +440,14 @@ const App: React.FC = () => {
           const responseJson: FinalizeResponse = await uploadResponse.json();
           console.log("Batch upload response JSON:", responseJson);
 
-          if (responseJson.script && typeof responseJson.script === 'string') {
+          if (responseJson.script) {
             console.log("Script received, setting action state.");
             setProcessingStep(4);
 
             await new Promise(resolve => setTimeout(resolve, 800));
 
-            setActionScript(responseJson.script);
+            console.log(`response: ${JSON.stringify(responseJson)}`);
+            setActionScript(responseJson.script.content);
             setViewState('action');
             uploadSucceeded = true;
           } else {
