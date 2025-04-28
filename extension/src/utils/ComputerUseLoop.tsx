@@ -42,6 +42,10 @@ async function executeTool(tabId: number, tool: ToolCall) {
   }
 }
 
+/**
+ * TODO: We need to send screenshots to the server for the function call.
+ * The response should contain the coordinates of the element to click, if we will click
+ */
 export async function samplingLoop(
   tabId: number,
   initialInstruction: string,
