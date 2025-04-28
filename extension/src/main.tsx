@@ -55,7 +55,7 @@ interface Script {
 // Combine view states
 type ViewState = 'authenticating' | 'authRequired' | 'loading' | 'empty' | 'recording' | 'uploading' | 'error' | 'action' | 'browseScripts';
 
-const API_BASE_URL = "https://31ca-4-39-199-2.ngrok-free.app"; // Define your backend URL
+const API_BASE_URL = " https://faf7-65-112-8-50.ngrok-free.app"; // Define your backend URL
 // AUTH_COOKIE_NAME is no longer checked here, but might still be relevant for backend interactions
 // const AUTH_COOKIE_NAME = "auth_session";
 
