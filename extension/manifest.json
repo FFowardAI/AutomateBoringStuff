@@ -16,7 +16,8 @@
   ],
   "host_permissions": [
     "http://localhost:8001/*",
-    "https://5aca-4-39-199-2.ngrok-free.app/*"
+    "https://5aca-4-39-199-2.ngrok-free.app/*",
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "dist/src/background.js"

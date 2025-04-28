@@ -46,7 +46,7 @@ router.post("/function-call", async (ctx: Context) => {
         }
 
         const body = await ctx.request.body.json();
-        const { markdown, domHtml, instruction } = body;
+        const { markdown, domHtml } = body;
 
         // Get the API key from environment variable
         const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
@@ -55,6 +55,9 @@ router.post("/function-call", async (ctx: Context) => {
             ctx.response.body = { error: "Missing ANTHROPIC_API_KEY environment variable" };
             return;
         }
+
+        // Truncate the DOM HTML to 1000 characters
+        const truncatedDomHtml = domHtml ? domHtml.slice(0, 2000) : "";
 
         const response = await fetch(ANTHROPIC_API_URL, {
             method: "POST",
@@ -71,10 +74,18 @@ router.post("/function-call", async (ctx: Context) => {
                     {
                         role: "user",
                         content:
-                            "You are given a Markdown todo list and an HTML DOM. " +
-                            "Pick exactly one tool to run. Only output via a tool_call.\n" +
-                            JSON.stringify({ markdown, dom: domHtml, currentInstruction: instruction }),
-                    },
+                            "You control a browser via exactly two tools:\n" +
+                            "1) click(selector: string)\n" +
+                            "2) navigate(url: string)\n\n" +
+                            "Given the following markdown instruction:\n\n" +
+                            markdown +
+                            "\n\nAnd the following DOM HTML (truncated to 1000 characters):\n\n" +
+                            truncatedDomHtml +
+                            "response with a tool call or a message depending on how many steps we have.\n\n" +
+                            "I you are calling a function, your message should be the next steps after we use call the tool" +
+                            "Only include the fields you need: use `toolCall` if you want the client to execute a tool, " +
+                            "or `message` when the task is complete."
+                    }
                 ],
                 tools
             }),
@@ -89,27 +100,27 @@ router.post("/function-call", async (ctx: Context) => {
 
         const data = await response.json();
 
-        // Extract the tool call from the response according to the structure returned in file_context_0
-        let toolCall;
-        console.log(data?.content);
-        for (const item of data?.content || []) {
-            if (item?.type === "tool_use") {
+        // Extract the toolCall and message fields from the response content
+        const assistantContent = data?.content || [];
+        let toolCall: { name: string; input: object } | null = null;
+        let message = "";
+
+        for (const item of assistantContent) {
+            if (item.type === "tool_use") {
                 toolCall = {
-                    id: item.id,
                     name: item.name,
                     input: item.input
                 };
-                break;
+            } else if (item.type === "text") {
+                message += item.text;
             }
         }
-        console.log(toolCall);
-        if (!toolCall) {
-            ctx.response.status = 400;
-            ctx.response.body = { error: "Tool call not found in the response" };
-            return;
-        }
 
-        ctx.response.body = { toolCall };
+        ctx.response.body = {
+            toolCall,
+            message: message.trim() || "No message provided by the model"
+        };
+
     } catch (err) {
         const error = err as Error;
         console.error("Error calling Anthropic API:", error);
