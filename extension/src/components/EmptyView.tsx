@@ -3,14 +3,12 @@ import { motion } from 'framer-motion'
 
 interface EmptyViewProps {
   onRecordClick: () => void
-  onRandomViewClick: () => void
   onBrowseScriptsClick?: () => void
   disabled?: boolean
 }
 
 export const EmptyView: React.FC<EmptyViewProps> = ({
   onRecordClick,
-  onRandomViewClick,
   onBrowseScriptsClick,
   disabled
 }) => (
@@ -35,14 +33,6 @@ export const EmptyView: React.FC<EmptyViewProps> = ({
     >
       Record
     </button>
-    <button
-      className="button button--secondary"
-      onClick={onRandomViewClick}
-      disabled={disabled}
-    >
-      Random‑ID Click View
-    </button>
-
     {onBrowseScriptsClick && (
       <button
         className="button button--secondary"
