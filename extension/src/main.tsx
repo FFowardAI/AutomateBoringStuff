@@ -7,6 +7,7 @@ import { RecordingView } from './components/RecordingView'
 import { AuthView } from './components/AuthView'
 import { AutoActionView } from './components/AutoActionView'
 import { ShowScriptsView } from './components/ShowScriptsView'
+import { LoadingView } from './components/LoadingView'
 
 // Define expected state structure from background
 interface BackgroundState {
@@ -38,9 +39,10 @@ interface SessionResponse {
 
 // Add type for the finalize endpoint response
 interface FinalizeResponse {
-  script?: string; // Make script optional in case API doesn't always return it
+  script?: {
+    content: string;
+  };
   message?: string;
-  // Add other potential fields
 }
 
 // Script type
@@ -53,7 +55,7 @@ interface Script {
 }
 
 // Combine view states
-type ViewState = 'authenticating' | 'authRequired' | 'loading' | 'empty' | 'recording' | 'uploading' | 'error' | 'action' | 'browseScripts';
+type ViewState = 'authenticating' | 'authRequired' | 'loading' | 'empty' | 'recording' | 'processingAction' | 'error' | 'action' | 'browseScripts';
 
 // const API_BASE_URL = "https://31ca-4-39-199-2.ngrok-free.app"; // Define your backend URL
 const API_BASE_URL = 'http://localhost:8002'; // Use local backend for development
@@ -94,6 +96,7 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false); // Add loading state for uploads
   const [actionScript, setActionScript] = useState<string | null>(null); // State for the script content
   const [processingStep, setProcessingStep] = useState<number>(1); // Track script generation progress
+  const [processingStatusText, setProcessingStatusText] = useState<string>(''); // Status text for LoadingView
 
   // --- Check Local Storage for Auth Details --- 
   useEffect(() => {
@@ -210,7 +213,7 @@ const App: React.FC = () => {
     const messageListener = (message: any, sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
       // Only process updates if we are in a post-auth state and not in the uploading state
       // Important: don't auto-transition from uploading state, as it should be controlled by the handleDoneClick flow
-      if ((viewState === 'empty' || viewState === 'recording') && viewState !== 'uploading') {
+      if ((viewState === 'empty' || viewState === 'recording') && viewState !== 'processingAction') {
         if (message.type === "state_update") {
           console.log("Popup received state update:", message.payload);
           const newState: BackgroundState = message.payload;
@@ -357,105 +360,62 @@ const App: React.FC = () => {
   };
 
   const handleDoneClick = async () => {
-    setIsLoading(true);
-    // First, get the recording ID from storage as a backup
-    let currentRecordingId: string | null = null;
-
-    try {
-      const storage = await chrome.storage.local.get(['currentRecordingId']);
-      if (storage.currentRecordingId) {
-        console.log("Retrieved recording ID from storage:", storage.currentRecordingId);
-        currentRecordingId = storage.currentRecordingId;
-        // If state doesn't have it but storage does, update the state
-        if (!recordingId) {
-          setRecordingId(storage.currentRecordingId);
-        }
-      }
-    } catch (storageError) {
-      console.error("Error getting recording ID from storage:", storageError);
-    }
-
-    // If we still don't have a recording ID from storage, use the state value
-    if (!currentRecordingId) {
-      currentRecordingId = recordingId;
-    }
-
-    console.log("Working with recording ID:", currentRecordingId);
-
+    const currentRecordingId = recordingId;
     const finalScreenshots = [...screenshots];
 
-    // Important: Set view state to uploading BEFORE sending stop message
-    // This ensures we show the loading UI instead of briefly showing the empty state
-    setViewState('uploading');
-    setProcessingStep(1); // Starting with step 1
-
-    // Now stop the recording
     console.log(`Stopping recording, preparing upload for ID: ${currentRecordingId}...`);
-    chrome.runtime.sendMessage({ type: "stop_recording" });
 
-    // Clear screenshots but don't clear recording ID yet
+    chrome.runtime.sendMessage({ type: "stop_recording" });
+    setRecordingId(null);
     setScreenshots([]);
-    setActionScript(null); // Clear previous script
+    setActionScript(null);
 
     if (!currentRecordingId) {
-      console.warn("Done clicked, no recording ID. Cannot upload.");
-      setErrorMessage("No recording ID found. Upload failed.");
-      setIsLoading(false);
-      setViewState('error');
+      setViewState('empty');
       return;
     }
-
     if (finalScreenshots.length === 0) {
-      console.log("No screenshots captured. Skipping upload.");
-      // Clear recording ID now
-      setRecordingId(null);
-      chrome.storage.local.remove(['currentRecordingId']);
-      setIsLoading(false);
       setViewState('empty');
       return;
     }
 
+    setIsLoading(true);
+    setProcessingStatusText("Uploading screenshots...");
+    setViewState('processingAction');
+
     const formData = new FormData();
     let conversionFailures = 0;
-    let uploadSucceeded = false; // Flag to track success
+    let uploadSucceeded = false;
 
     console.log("Converting screenshots...");
     for (let i = 0; i < finalScreenshots.length; i++) {
       const screenshotDataUrl = finalScreenshots[i];
       const blob = dataURLtoBlob(screenshotDataUrl);
 
-      if (!blob) {
-        console.error(`Failed to convert screenshot ${i + 1} to Blob.`);
+      if (blob) {
+        formData.append('files', blob, `screenshot_${i + 1}.png`);
+      } else {
         conversionFailures++;
-        continue;
       }
-      formData.append('files', blob, `screenshot_${i + 1}.png`);
     }
 
     if (conversionFailures > 0) {
       console.warn(`Skipped ${conversionFailures} screenshots due to conversion errors.`);
     }
 
-    setProcessingStep(2); // Update to step 2: Preparing upload
-
     const filesToUploadCount = formData.getAll('files').length;
     if (filesToUploadCount === 0) {
       console.warn("No valid screenshots to upload after conversion.");
       setErrorMessage("Failed to process screenshots for upload.");
-      // Clear recording ID now
-      setRecordingId(null);
-      chrome.storage.local.remove(['currentRecordingId']);
-      // Skip fetch, go directly to finally block (which now sets state based on uploadSucceeded)
-      throw new Error("No valid files to upload"); // Throw to go to catch block
+      setViewState('error');
+      throw new Error("No valid files to upload");
     } else {
-      // Send the single POST request with all files
       console.log(`Uploading ${filesToUploadCount} screenshots...`);
       try {
         console.log(`Making finalize request to: ${API_BASE_URL}/api/recordings/${currentRecordingId}/finalize`);
 
-        setProcessingStep(3); // Step 3: Uploading screenshots
+        setProcessingStep(2);
 
-        // Small delay to ensure the UI updates before making the request
         await new Promise(resolve => setTimeout(resolve, 500));
 
         const uploadResponse = await fetch(`${API_BASE_URL}/api/recordings/${currentRecordingId}/finalize`, {
@@ -474,47 +434,37 @@ const App: React.FC = () => {
           console.error(`Failed to upload screenshot batch. Error: ${errorText}`);
           throw new Error(`Batch upload failed: ${errorText}`);
         } else {
-          setProcessingStep(4); // Step 4: Processing images with AI
+          setProcessingStep(3);
+
+          setProcessingStatusText("Processing recording...");
 
           const responseJson: FinalizeResponse = await uploadResponse.json();
           console.log("Batch upload response JSON:", responseJson);
 
           if (responseJson.script) {
             console.log("Script received, setting action state.");
-            setProcessingStep(5); // Step 5: Script generated
+            setProcessingStep(4);
 
-            // Small delay to show the final step before transitioning
             await new Promise(resolve => setTimeout(resolve, 800));
 
-            // Assuming responseJson.script is the string content itself based on the lint error
-            setActionScript(responseJson.script);
-            setViewState('action'); // Transition to action view
-            uploadSucceeded = true; // Mark as success
+            console.log(`response: ${JSON.stringify(responseJson)}`);
+            setActionScript(responseJson.script.content);
+            setViewState('action');
+            uploadSucceeded = true;
           } else {
             console.warn("Upload succeeded, but no valid script found in response.");
             setErrorMessage("Processing complete, but failed to retrieve action script.");
-            // Decide: go to empty or error? Let's go to error for clarity.
             setViewState('error');
           }
         }
       } catch (uploadError: any) {
-        console.error(`Network or server error during batch upload:`, uploadError);
-        setErrorMessage(`Upload failed: ${uploadError.message}`);
-
-        // Small delay to ensure the UI updates before transitioning
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        // Go to error state on failure
+        console.error(`Processing error:`, uploadError);
+        setErrorMessage(uploadError.message || "An unknown error occurred during processing.");
         setViewState('error');
       } finally {
-        setIsLoading(false); // Stop loading indicator
-        // Clear recording ID now that we're done with it
-        setRecordingId(null);
-        chrome.storage.local.remove(['currentRecordingId']);
-        // Only set to empty if upload didn't succeed AND we are not in error state
-        if (!uploadSucceeded && viewState !== 'error' && viewState !== 'action') {
-          setViewState('empty');
-        }
+        setIsLoading(false);
+        // State is now set explicitly within try/catch blocks for success/failure
+        // No need to set state here unless there's a fallback needed
       }
     }
   };
@@ -550,92 +500,16 @@ const App: React.FC = () => {
               Loading recording state...
             </motion.div>
           )}
-          {viewState === 'uploading' && (
-            <motion.div
-              key="uploading"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              style={{
-                textAlign: 'center',
-                padding: '20px',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                height: '70vh'
-              }}
-            >
-              <div className="recording-dot" style={{ marginBottom: '20px' }} />
-              <h3 style={{ marginBottom: '10px' }}>Generating Your Script</h3>
-
-              <div style={{ marginBottom: '20px', width: '80%', maxWidth: '300px' }}>
-                <div style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  marginBottom: '10px'
-                }}>
-                  {[1, 2, 3, 4, 5].map(step => (
-                    <div
-                      key={step}
-                      style={{
-                        width: '20px',
-                        height: '20px',
-                        borderRadius: '50%',
-                        backgroundColor: step <= processingStep ? '#ff6a88' : '#e0e0e0',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: '#fff',
-                        fontSize: '12px',
-                        transition: 'background-color 0.3s ease'
-                      }}
-                    >
-                      {step}
-                    </div>
-                  ))}
-                </div>
-                <div style={{ height: '4px', backgroundColor: '#e0e0e0', position: 'relative' }}>
-                  <div
-                    style={{
-                      position: 'absolute',
-                      left: 0,
-                      top: 0,
-                      height: '100%',
-                      width: `${(processingStep - 1) * 25}%`,
-                      backgroundColor: '#ff6a88',
-                      transition: 'width 0.3s ease'
-                    }}
-                  />
-                </div>
-              </div>
-
-              {processingStep === 1 && (
-                <p>Processing screenshots...</p>
-              )}
-              {processingStep === 2 && (
-                <p>Preparing to upload...</p>
-              )}
-              {processingStep === 3 && (
-                <p>Uploading to server...</p>
-              )}
-              {processingStep === 4 && (
-                <p>Analyzing images with AI...</p>
-              )}
-              {processingStep === 5 && (
-                <p>Script generated! Preparing to display...</p>
-              )}
-
-              <p style={{ fontSize: '0.9rem', color: '#666', maxWidth: '80%', margin: '10px auto' }}>
-                This may take a few moments as we analyze your activity and create automation steps.
-              </p>
-            </motion.div>
+          {viewState === 'processingAction' && (
+            <LoadingView
+              key="processing"
+              statusText={processingStatusText || "Processing..."}
+            />
           )}
           {viewState === 'empty' && (
             <EmptyView
               key="empty"
               onRecordClick={handleRecordClick}
-              onRandomViewClick={handleConsume}
               onBrowseScriptsClick={() => setViewState('browseScripts')}
               disabled={isLoading} // Disable buttons during loading
             />
