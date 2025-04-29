@@ -1,6 +1,6 @@
 html, body {
-  width: 800px;
-  height: 600px;
+  width: 350px; /* Reduced width for sidebar */
+  height: 100vh; /* Full viewport height */
   margin: 0;
   padding: 0;
   overflow: hidden; /* Optional: prevent scrollbars if content overflows */
@@ -22,84 +22,91 @@ html, body {
     /* Faint pastel purple gradient */
     background: linear-gradient(180deg, #f9f7ff, #f5f5fc);
     padding-top: 1rem; /* Add padding to push content down */
-  }
+    position: fixed; /* Fix position */
+    top: 0;
+    right: 0; /* Position at right side of screen */
+    width: 350px; /* Fixed width */
+    border-left: 1px solid #e0e0e0; /* Add a subtle border */
+    box-shadow: -2px 0 10px rgba(0, 0, 0, 0.1); /* Add shadow for depth */
+    z-index: 9999; /* Ensure it appears above other content */
+}
   
-  /* App Title (formerly header) */
-  .app__header {
-    padding-left: 1rem; /* Align with body content potentially */
-    margin-bottom: 1.5rem; /* Space below title */
-    font-size: 1.1rem; /* Smaller font size */
-    font-weight: 600; /* Keep bold */
-    color: #4e54c8; /* Darker color for visibility */
-    /* Removed background, box-shadow, text-align */
-  }
+/* App Title (formerly header) */
+.app__header {
+  padding-left: 1rem; /* Align with body content potentially */
+  margin-bottom: 1.5rem; /* Space below title */
+  font-size: 1.1rem; /* Smaller font size */
+  font-weight: 600; /* Keep bold */
+  color: #4e54c8; /* Darker color for visibility */
+  /* Removed background, box-shadow, text-align */
+}
   
-  /* Centered body */
-  .app__body {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 2rem;
-  }
+/* Centered body */
+.app__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+}
   
-  .app__message {
-    font-size: 1rem;
-    color: #333;
-    text-align: center;
-    margin-bottom: 2rem;
-    line-height: 1.5;
-    font-family: 'Instrument Serif', serif;
-  }
+.app__message {
+  font-size: 1rem;
+  color: #333;
+  text-align: center;
+  margin-bottom: 2rem;
+  line-height: 1.5;
+  font-family: 'Instrument Serif', serif;
+}
   
-  /* Refactored Button Styles */
-  .button {
-    font-size: 0.95rem; /* Updated */
-    font-weight: 600; /* Kept */
-    padding: 0.6rem 1.8rem; /* Updated */
-    border-radius: 9999px; /* Updated */
-    cursor: pointer;
-    border: none; /* Base buttons have no border */
-    transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
-    margin-top: 1rem; /* Keep default margin */
-  }
+/* Refactored Button Styles */
+.button {
+  font-size: 0.95rem; /* Updated */
+  font-weight: 600; /* Kept */
+  padding: 0.6rem 1.8rem; /* Updated */
+  border-radius: 9999px; /* Updated */
+  cursor: pointer;
+  border: none; /* Base buttons have no border */
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+  margin-top: 1rem; /* Keep default margin */
+}
   
-  .button:hover {
-    transform: translateY(-2px);
-    transition: all 0.2s ease;
-    box-shadow: 0 2px 8px rgba(255, 105, 135, 0.3);
-  }
+.button:hover {
+  transform: translateY(-2px);
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(255, 105, 135, 0.3);
+}
   
-  .button:active {
-    transform: translateY(0);
-    box-shadow: none;
-  }
+.button:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
   
-  /* Primary Button (Original Record Button Style) */
-  .button--primary {
-    background: linear-gradient(90deg, #ff9a8b, #ff6a88, #ff99ac);
-    color: #fff;
-  }
+/* Primary Button (Original Record Button Style) */
+.button--primary {
+  background: linear-gradient(90deg, #ff9a8b, #ff6a88, #ff99ac);
+  color: #fff;
+}
   
-  .button--primary:hover {
-    /* Inherits base hover */
-  }
+.button--primary:hover {
+  /* Inherits base hover */
+}
   
-  /* Secondary Button (Original Cancel Button Style) */
-  .button--secondary {
-    background: transparent;
-    color: #6c757d; /* Gray text color */
-    border: 1px solid #6c757d; /* Gray outline */
-    font-weight: normal; /* Override base bold font */
-  }
+/* Secondary Button (Original Cancel Button Style) */
+.button--secondary {
+  background: transparent;
+  color: #6c757d; /* Gray text color */
+  border: 1px solid #6c757d; /* Gray outline */
+  font-weight: normal; /* Override base bold font */
+}
 
-  .button--secondary:hover {
-    background: transparent;
-    color: #495057; /* Darker gray text on hover */
-    border-color: #ced4da; /* Slightly lighter gray border on hover */
-    /* Inherits base hover transform/shadow */
-  }
+.button--secondary:hover {
+  background: transparent;
+  color: #495057; /* Darker gray text on hover */
+  border-color: #ced4da; /* Slightly lighter gray border on hover */
+  /* Inherits base hover transform/shadow */
+}
 
 /* Roadmap styles */
 .roadmap {

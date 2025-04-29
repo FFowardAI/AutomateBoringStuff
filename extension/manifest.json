@@ -4,7 +4,11 @@
   "version": "0.0.1",
   "description": "Make your life less boring",
   "action": {
-    "default_popup": "dist/index.html"
+    "default_icon": {
+      "16": "images/icon16.png",
+      "48": "images/icon48.png",
+      "128": "images/icon128.png"
+    }
   },
   "permissions": [
     "tabs",
@@ -12,7 +16,8 @@
     "scripting",
     "storage",
     "desktopCapture",
-    "activeTab"
+    "activeTab",
+    "sidePanel"
   ],
   "host_permissions": [
     "http://localhost:8001/*",
@@ -22,10 +27,17 @@
   "background": {
     "service_worker": "dist/src/background.js"
   },
+  "side_panel": {
+    "default_path": "dist/index.html"
+  },
   "web_accessible_resources": [
     {
-      "resources": ["/images/*"],
-      "matches": ["<all_urls>"]
+      "resources": [
+        "/images/*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ]
 }
