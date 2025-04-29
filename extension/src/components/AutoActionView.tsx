@@ -78,16 +78,16 @@ export const AutoActionView: React.FC<AutoActionViewProps> = ({
         throw new Error("Cannot run on this page");
       }
 
-      if (parsedScript) {
-        // —— NEW SCRIPT FLOW —— 
-        // (copy/paste or call into your existing “new logic” here)
-        // e.g. fetch(…); executeScript(…); etc, based on parsedScript.steps
-        // at end you might clear loading or set some “done” flag
-        console.log("Running new JSON‐script flow…");
-        // … your code …
-        setLoading(false);
-        return;
-      }
+      // if (parsedScript) {
+      //   // —— NEW SCRIPT FLOW —— 
+      //   // (copy/paste or call into your existing “new logic” here)
+      //   // e.g. fetch(…); executeScript(…); etc, based on parsedScript.steps
+      //   // at end you might clear loading or set some “done” flag
+      //   console.log("Running new JSON‐script flow…");
+      //   // … your code …
+      //   setLoading(true);
+      //   return;
+      // }
 
       // —— LEGACY MARKDOWN FLOW —— 
       const result = await samplingLoop(tab.id, markdown, console.log, 10);

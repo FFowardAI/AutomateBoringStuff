@@ -2,7 +2,15 @@
 /// <reference lib="dom" />
 
 export type ToolCall =
-  | { name: "click"; input: { selector: string; coordinates?: { x: number; y: number } } }
+  | {
+      name: "click";
+      input: {
+        selector?: string;
+        coordinates?: { x: number; y: number };
+        screenshotDimensions?: { width: number; height: number };
+        url?: string;
+      };
+    }
   | { name: "navigate"; input: { url: string } };
 
 export interface LoopResponse {
@@ -23,74 +31,117 @@ const API_URL =
   process.env.DEV_API?.concat("/computer_use/function-call") ||
   "http://localhost:8002/api/computer-use/function-call";
 
+let screenshotDimensions: { width: number; height: number } | null = null;
+
 /**
  * Captures a screenshot of the current active tab
- * 
+ *
  * Uses the Chrome API to capture the visible tab as a PNG.
  * The screenshot is returned as a data URL string that can be:
  * 1. Sent directly to the server for processing
  * 2. Displayed in the UI
  * 3. Converted to a Blob for upload
- * 
+ *
  * @returns A promise that resolves to the screenshot as a data URL (format: "data:image/png;base64,...")
  * @throws Error if no active tab is found or if screenshot capture fails
  */
-async function captureScreenshot(): Promise<string> {
+async function captureScreenshot(): Promise<{
+  screenshot: string;
+  width: number;
+  height: number;
+}> {
+  // Find the active tab
   const [tab] = await chrome.tabs.query({
     active: true,
     currentWindow: true,
   });
-  if (!tab?.id) throw new Error("No active tab found");
+  if (!tab?.id || tab.windowId === undefined) {
+    throw new Error("No active tab or window found");
+  }
 
+  // Get the window dimensions
+  const win = await chrome.windows.get(tab.windowId);
+  if (typeof win.width !== "number" || typeof win.height !== "number") {
+    throw new Error("Unable to determine window dimensions");
+  }
+
+  // Capture the visible tab as a PNG data URL
+  let dataUrl: string;
   try {
-    const dataUrl = await chrome.tabs.captureVisibleTab(
-      tab.windowId,
-      { format: 'png' }
-    );
-    return dataUrl;
+    dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
+      format: "png",
+    });
   } catch (error) {
     console.error("Error capturing screenshot:", error);
     throw new Error("Failed to capture screenshot");
   }
-}
 
+  screenshotDimensions = { width: win.width, height: win.height };
+  return {
+    screenshot: dataUrl,
+    width: win.width,
+    height: win.height,
+  };
+}
 async function executeTool(tabId: number, tool: ToolCall) {
   if (tool.name === "click") {
-    const sel = tool.input.selector;
-    const coordinates = tool.input.coordinates;
+    const { selector, coordinates } = tool.input;
 
-    if (coordinates) {
-      // Use coordinates to click at a specific position
+    // coordinate-based click
+    if (coordinates && screenshotDimensions) {
+      const { x: rawX, y: rawY } = coordinates;
+      const { width: shotW, height: shotH } = screenshotDimensions;
+
       await chrome.scripting.executeScript({
         target: { tabId },
-        func: function (x: number, y: number) {
-          // This function runs in the context of the web page where DOM is available
-          const clickEvent = new MouseEvent('click', {
-            bubbles: true,
-            cancelable: true,
-            view: window,
-            clientX: x,
-            clientY: y
-          });
-          const element = document.elementFromPoint(x, y);
-          if (element) {
-            element.dispatchEvent(clickEvent);
-          } else {
-            console.error("No element found at coordinates:", x, y);
+        world: "MAIN", // ← run in page’s main JS world
+        func: (rawX, rawY, shotW, shotH) => {
+          // 1) scale
+          const scaleX = window.innerWidth / shotW;
+          const scaleY = window.innerHeight / shotH;
+          const clientX = rawX * scaleX;
+          const clientY = rawY * scaleY;
+
+          // 2) account for scroll
+          const viewX = clientX - window.scrollX;
+          const viewY = clientY - window.scrollY;
+
+          // 3) find & scroll into view
+          const el = document.elementFromPoint(viewX, viewY);
+          if (!el) {
+            console.error("No element at", viewX, viewY);
+            return;
           }
+          el.scrollIntoView({ block: "center", inline: "center" });
+
+          // 4) fire full pointer/mouse sequence
+          for (const type of ["pointermove", "mousedown", "mouseup"] as const) {
+            el.dispatchEvent(
+              new MouseEvent(type, {
+                clientX: viewX,
+                clientY: viewY,
+                bubbles: true,
+                cancelable: true,
+                view: window,
+              })
+            );
+          }
+          (el as HTMLElement).click();
         },
-        args: [coordinates.x, coordinates.y],
+        args: [rawX, rawY, shotW, shotH],
       });
-    } else {
-      // Fall back to selector-based clicking
+
+      // selector fallback
+    } else if (selector) {
       await chrome.scripting.executeScript({
         target: { tabId },
-        func: function (s: string) {
+        world: "MAIN", // ← also in MAIN world
+        func: (s: string) => {
           const el = document.querySelector(s) as HTMLElement | null;
           if (el) el.click();
           else console.error("Selector not found:", s);
         },
-        args: [sel],
+        args: [selector],
       });
     }
   } else if (tool.name === "navigate") {
@@ -98,18 +149,19 @@ async function executeTool(tabId: number, tool: ToolCall) {
   }
 }
 
+
 /**
  * Handles automated browser actions based on screenshots and instructions.
- * 
+ *
  * This module captures screenshots of the browser and sends them to the server,
  * which uses computer vision to analyze the page and determine what actions to take.
- * 
+ *
  * Implementation:
  * 1. ✅ Takes screenshots of the current tab using Chrome extension APIs
  * 2. ✅ Sends screenshots to the server for visual analysis (no DOM HTML)
  * 3. ✅ Handles click operations using coordinates when available
  * 4. ✅ Supports navigation to URLs
- * 
+ *
  * The server side handles:
  * - Processing the screenshot
  * - Using computer vision to determine what elements can be interacted with
@@ -127,24 +179,16 @@ export async function samplingLoop(
   for (let i = 0; i < maxIterations; i++) {
     try {
       // Capture screenshot
-      let screenshot: string;
-      try {
-        screenshot = await captureScreenshot();
-        console.log("Screenshot captured successfully");
-      } catch (error) {
-        console.error("Failed to capture screenshot:", error);
-        throw new Error("Screenshot is required for this operation");
-      }
+      const { screenshot, width, height } = await captureScreenshot();
 
+      console.log(`Captured screenshot for iteration ${i + 1}`);
       // Create the API request payload
       const requestPayload: ApiRequest = {
         markdown: instruction,
         screenshot,
-        instruction: ""
+        instruction: `Screen size: ${width}x${height}.`,
       };
-
       console.log("Sending API request with screenshot");
-
       const resp = await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
