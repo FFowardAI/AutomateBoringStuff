@@ -87,14 +87,17 @@ async function executeTool(tabId: number, tool: ToolCall) {
   if (tool.name === "click") {
     const { selector, coordinates } = tool.input;
 
+    console.log("Executing tool:", tool.name, tool.input);
     // coordinate-based click
     if (coordinates && screenshotDimensions) {
       const { x: rawX, y: rawY } = coordinates;
       const { width: shotW, height: shotH } = screenshotDimensions;
 
+      console.log("Executing click at coordinates:", rawX, rawY);
+
       await chrome.scripting.executeScript({
         target: { tabId },
-        world: "MAIN", // ← run in page’s main JS world
+        world: "MAIN",
         func: (rawX, rawY, shotW, shotH) => {
           // 1) scale
           const scaleX = window.innerWidth / shotW;
@@ -107,26 +110,55 @@ async function executeTool(tabId: number, tool: ToolCall) {
           const viewY = clientY - window.scrollY;
 
           // 3) find & scroll into view
-          const el = document.elementFromPoint(viewX, viewY);
-          if (!el) {
-            console.error("No element at", viewX, viewY);
-            return;
-          }
-          el.scrollIntoView({ block: "center", inline: "center" });
+          const el = document.elementFromPoint(viewX, viewY) as HTMLElement;
+          if (!el) return;
 
-          // 4) fire full pointer/mouse sequence
+          // el.scrollIntoView({ block: "center", inline: "center" });
+
+          // ↓ NEW: create or reuse ghost cursor
+          let ghost = document.getElementById(
+            "__ghost_cursor__"
+          ) as HTMLElement;
+          if (!ghost) {
+            ghost = document.createElement("div");
+            ghost.id = "__ghost_cursor__";
+            Object.assign(ghost.style, {
+              position: "fixed",
+              width: "20px",
+              height: "20px",
+              background: "rgba(0,0,0,0.4)",
+              border: "2px solid white",
+              borderRadius: "50%",
+              pointerEvents: "none",
+              transform: "translate(-50%, -50%)",
+              transition: "left 0.1s linear, top 0.1s linear",
+              zIndex: "999999",
+            });
+            document.body.appendChild(ghost);
+          }
+          // move ghost to target
+          ghost.style.left = `${clientX}px`;
+          ghost.style.top = `${clientY}px`;
+
+          // dispatch pointer events
           for (const type of ["pointermove", "mousedown", "mouseup"] as const) {
             el.dispatchEvent(
               new MouseEvent(type, {
-                clientX: viewX,
-                clientY: viewY,
+                clientX,
+                clientY,
                 bubbles: true,
                 cancelable: true,
-                view: window,
               })
             );
           }
-          (el as HTMLElement).click();
+
+          // finally click
+          el.click();
+
+          // optional: remove ghost after click
+          setTimeout(() => {
+            ghost.remove();
+          }, 500);
         },
         args: [rawX, rawY, shotW, shotH],
       });
@@ -148,7 +180,6 @@ async function executeTool(tabId: number, tool: ToolCall) {
     await chrome.tabs.update(tabId, { url: tool.input.url });
   }
 }
-
 
 /**
  * Handles automated browser actions based on screenshots and instructions.
@@ -201,7 +232,7 @@ export async function samplingLoop(
 
       const data: LoopResponse = await resp.json();
       onIteration?.(data);
-
+      console.log(`Received response for iteration ${i + 1}`, data);
       if (data.toolCall) {
         console.log(`Executing tool: ${data.toolCall.name}`);
         await executeTool(tabId, data.toolCall);
