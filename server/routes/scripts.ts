@@ -1,8 +1,20 @@
 import { Router, Context } from "oak";
 import { supabase } from "../db/supabaseClient.ts";
 import { Script, ScriptStatus } from "../db/models.ts";
+import { updateScriptWithContext } from "../utils/anthropicUtils.ts";
+import { config } from "dotenv";
+
+// Load environment variables
+const env = await config({ safe: true, export: true });
 
 const router = new Router();
+
+// Define a helper type for Router Context that includes params
+type RouterContext = Context & {
+    params: {
+        [key: string]: string;
+    };
+};
 
 // GET /api/scripts/all - List all scripts
 router.get("/all", async (ctx: Context) => {
@@ -19,21 +31,12 @@ router.get("/all", async (ctx: Context) => {
     ctx.response.body = data;
 });
 
-// GET /api/scripts?session_id=<uuid> - List scripts for a session
+// GET /api/scripts - List scripts (potentially filtered)
 router.get("/", async (ctx: Context) => {
-    const sessionId = ctx.request.url.searchParams.get('session_id');
-
-    if (!sessionId) {
-        ctx.response.status = 400;
-        ctx.response.body = { error: "session_id query parameter is required" };
-        return;
-    }
-
-    // TODO: Security check: Does user own the parent session?
+    // TODO: Add filtering (e.g., by user_id, status, etc.)
     const { data, error } = await supabase
         .from('scripts')
         .select('*')
-        .eq('session_id', sessionId)
         .order('created_at', { ascending: false });
 
     if (error) {
@@ -45,7 +48,7 @@ router.get("/", async (ctx: Context) => {
 });
 
 // GET /api/scripts/:id - Get a specific script
-router.get("/:id", async (ctx: Context) => {
+router.get("/:id", async (ctx: RouterContext) => {
     const { id } = ctx.params;
     if (!id) {
         ctx.response.status = 400;
@@ -53,7 +56,7 @@ router.get("/:id", async (ctx: Context) => {
         return;
     }
 
-    // TODO: Add security check
+    // TODO: Add security check - does user own this script or have access?
     const { data, error } = await supabase
         .from('scripts')
         .select('*')
@@ -112,8 +115,8 @@ router.post("/", async (ctx: Context) => {
     }
 });
 
-// PUT /api/scripts/:id - Update script content or status
-router.put("/:id", async (ctx: Context) => {
+// PUT /api/scripts/:id - Update a script (status, etc.)
+router.put("/:id", async (ctx: RouterContext) => {
     const { id } = ctx.params;
     if (!id) {
         ctx.response.status = 400;
@@ -123,26 +126,24 @@ router.put("/:id", async (ctx: Context) => {
 
     try {
         const body = await ctx.request.body.json();
-        const { content, status } = body as Partial<Script>;
+        const { status, content, is_structured, structured_data } = body as Partial<Script>;
 
-        const updateData: Partial<Script> = {};
-        if (content !== undefined) updateData.content = content;
-        if (status !== undefined) {
-            if (!['pending', 'completed', 'failed'].includes(status)) {
-                ctx.response.status = 400;
-                ctx.response.body = { error: "Invalid status provided" };
-                return;
-            }
-            updateData.status = status;
-        }
-
-        if (Object.keys(updateData).length === 0) {
+        // Simple validation
+        const validStatuses = ['pending', 'completed', 'failed'];
+        if (status && !validStatuses.includes(status)) {
             ctx.response.status = 400;
-            ctx.response.body = { error: "No update fields provided (content, status)" };
+            ctx.response.body = { error: `Invalid status provided. Must be one of: ${validStatuses.join(', ')}` };
             return;
         }
 
-        // TODO: Security check
+        // Prepare update data
+        const updateData: Partial<Script> = {};
+        if (status) updateData.status = status as ScriptStatus;
+        if (content !== undefined) updateData.content = content;
+        if (is_structured !== undefined) updateData.is_structured = is_structured;
+        if (structured_data !== undefined) updateData.structured_data = structured_data;
+
+        // Perform the update
         const { data, error } = await supabase
             .from('scripts')
             .update(updateData)
@@ -156,9 +157,8 @@ router.put("/:id", async (ctx: Context) => {
             return;
         }
 
-        // TODO: Trigger notification if status changed (e.g., to 'completed')
-
         ctx.response.body = data;
+
     } catch (err) {
         console.error(`Error updating script ${id}:`, err);
         ctx.response.status = 500;
@@ -167,7 +167,7 @@ router.put("/:id", async (ctx: Context) => {
 });
 
 // DELETE /api/scripts/:id - Delete a script
-router.delete("/:id", async (ctx: Context) => {
+router.delete("/:id", async (ctx: RouterContext) => {
     const { id } = ctx.params;
     if (!id) {
         ctx.response.status = 400;
@@ -175,23 +175,101 @@ router.delete("/:id", async (ctx: Context) => {
         return;
     }
 
-    // TODO: Add security check
-    // Note: Cascading deletes should handle related activations, compute_jobs, notifications if set up correctly in DB schema
-
+    // TODO: Add security check - does user own this script or have delete permission?
     const { error } = await supabase
         .from('scripts')
         .delete()
         .eq('id', id);
 
     if (error) {
-        // Check if the error is because the script was not found
-        // Supabase delete doesn't error on not found, but count might be 0 if needed
         ctx.response.status = 500;
         ctx.response.body = { error: "Failed to delete script", message: error.message };
         return;
     }
 
-    ctx.response.status = 204; // No Content
+    ctx.response.status = 204; // No content
+});
+
+// POST /api/scripts/:id/update-with-context - Update a script with additional context
+router.post("/:id/update-with-context", async (ctx: RouterContext) => {
+    const { id } = ctx.params;
+    if (!id) {
+        ctx.response.status = 400;
+        ctx.response.body = { error: "Script ID is required" };
+        return;
+    }
+
+    try {
+        // Parse the request body
+        const body = await ctx.request.body.json();
+        const { context } = body;
+
+        if (!context) {
+            ctx.response.status = 400;
+            ctx.response.body = { error: "Context is required" };
+            return;
+        }
+
+        // Get the existing script
+        const { data: script, error: scriptError } = await supabase
+            .from('scripts')
+            .select('*')
+            .eq('id', id)
+            .single();
+
+        if (scriptError || !script) {
+            ctx.response.status = scriptError?.code === 'PGRST116' ? 404 : 500;
+            ctx.response.body = {
+                error: scriptError?.code === 'PGRST116' ? "Script not found" : "Failed to fetch script",
+                message: scriptError?.message
+            };
+            return;
+        }
+
+        // Get API key from environment
+        const apiKey = env.ANTHROPIC_API_KEY;
+        if (!apiKey) {
+            ctx.response.status = 500;
+            ctx.response.body = { error: "Anthropic API key not found in server configuration" };
+            return;
+        }
+
+        // Update the script with the new context
+        const { scriptContent, isValidJson, structuredContent } = await updateScriptWithContext(
+            apiKey,
+            script.content,
+            context
+        );
+
+        // Update the script in the database
+        const updateData: Partial<Script> = {
+            content: scriptContent,
+            is_structured: isValidJson,
+            structured_data: isValidJson ? structuredContent : null
+        };
+
+        const { data: updatedScript, error: updateError } = await supabase
+            .from('scripts')
+            .update(updateData)
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (updateError) {
+            ctx.response.status = 500;
+            ctx.response.body = { error: "Failed to update script", message: updateError.message };
+            return;
+        }
+
+        ctx.response.body = updatedScript;
+    } catch (err: unknown) {
+        console.error(`Error updating script ${id} with context:`, err);
+        ctx.response.status = 500;
+        ctx.response.body = {
+            error: "Internal server error during script update",
+            message: err instanceof Error ? err.message : String(err)
+        };
+    }
 });
 
 export default router; 

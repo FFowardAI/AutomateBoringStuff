@@ -25,6 +25,7 @@ interface ScriptStep {
 }
 
 interface ParsedScript {
+    id?: string;
     metadata: { title: string; url: string; totalSteps: number };
     steps: { stepNumber: number; action: string; target: string; value: string | null; url: string; expectedResult: string }[];
     summary: string;
@@ -81,7 +82,10 @@ export const ShowScriptsView: React.FC<ShowScriptsViewProps> = ({ onBack, script
     const handleCardClick = (script: Script) => {
         const parsedContent = parseScriptContent(script.content);
         if (parsedContent) {
-            setSelectedScript(parsedContent);
+            setSelectedScript({
+                ...parsedContent,
+                id: script.id
+            });
         }
     };
 

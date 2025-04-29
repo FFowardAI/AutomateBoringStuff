@@ -57,6 +57,7 @@ interface Script {
 
 // Define the structure for parsed script content, used in ScriptDetailsView
 interface ParsedScript {
+  id?: string;
   metadata: { title: string; url: string; totalSteps: number };
   steps: { stepNumber: number; action: string; target: string; value: string | null; url: string; expectedResult: string }[];
   summary: string;

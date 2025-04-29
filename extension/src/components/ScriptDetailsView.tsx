@@ -17,6 +17,7 @@ interface ScriptStep {
 }
 
 interface ParsedScript {
+    id?: string;
     metadata: ScriptMetadata;
     steps: ScriptStep[];
     summary: string;
@@ -38,6 +39,17 @@ export const ScriptDetailsView: React.FC<ScriptDetailsViewProps> = ({ script, on
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [finalMessage, setFinalMessage] = useState<string>("");
+
+    // Get the base URL for API calls
+    const getApiBaseUrl = () => {
+        // For development
+        if (process.env.DEV_API) {
+            return process.env.DEV_API;
+        }
+        // For production, try to use the server URL from extension settings
+        // or fall back to default localhost URL
+        return "https://faf7-65-112-8-50.ngrok-free.app";
+    };
 
     // Handler for local edits (for now, just toggles edit mode)
     const handleEditToggle = () => {
@@ -71,25 +83,65 @@ export const ScriptDetailsView: React.FC<ScriptDetailsViewProps> = ({ script, on
                 throw new Error("No active tab found");
             }
 
-            // TODO: We should probably revisit this part here. And regenerate the whole script with context.
-            // Add context to the script if provided
-            // const scriptWithContext = contextPrompt.trim()
-            //     ? `${contextPrompt}\n\n${scriptContent}`
-            //     : scriptContent;
+            let updatedScript = editableScript;
 
-            // Use the same logic as AutoActionView
+            // If context is provided, update the script with the new context
+            if (contextPrompt.trim()) {
+                try {
+                    setFinalMessage("Updating script with context...");
+
+                    // Access the ID using type assertion 
+                    const scriptId = (script as ParsedScript & { id?: string }).id;
+
+                    if (!scriptId) {
+                        throw new Error("Script ID not found, cannot update with context");
+                    }
+
+                    // Call the server endpoint to update the script with context
+                    const response = await fetch(`${getApiBaseUrl()}/api/scripts/${scriptId}/update-with-context`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json',
+                            'ngrok-skip-browser-warning': 'true'
+                        },
+                        body: JSON.stringify({ context: contextPrompt.trim() })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`Failed to update script with context: ${response.status} ${response.statusText}`);
+                    }
+
+                    const updatedScriptData = await response.json();
+                    // Update the script with the new content from the server
+                    updatedScript = {
+                        ...editableScript,
+                        ...updatedScriptData
+                    };
+
+                    setFinalMessage("Script updated with context successfully!");
+                } catch (contextError: any) {
+                    console.error("Error updating script with context:", contextError);
+                    setFinalMessage(`Error updating script: ${contextError.message}. Running original version...`);
+                }
+            }
+
+            // Use the same logic as AutoActionView, but with the potentially updated script
             let result = "";
-            console.log("Running script:", JSON.stringify(editableScript.steps));
-            for (const [i, step] of editableScript.steps.entries() || []) {
+            console.log("Running script:", JSON.stringify(updatedScript.steps));
+            for (const [i, step] of updatedScript.steps.entries() || []) {
                 console.log("Running step:", step);
-                result = await samplingLoop(tab.id, JSON.stringify(step) + "\n\nContext: " + contextPrompt, i.toString(), console.log, 10);
+                // Pass the instruction without context (it's already incorporated in the updated script)
+                const instruction = JSON.stringify(step);
+                console.log("Instruction:", instruction);
+                result = await samplingLoop(tab.id, instruction, i.toString(), console.log, 10);
             }
             console.log("Automation completed:", result);
             setFinalMessage(result);
 
-            // If onRun prop is provided, call it
+            // If onRun prop is provided, call it with the updated script
             if (onRun) {
-                onRun(editableScript, contextPrompt);
+                onRun(updatedScript, contextPrompt);
             }
         } catch (e: any) {
             setError(e.message || "Unknown error");

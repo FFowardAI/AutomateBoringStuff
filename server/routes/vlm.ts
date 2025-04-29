@@ -1,5 +1,6 @@
 import { Router, Context } from "oak";
 import { supabase, supabaseUrl } from "../db/supabaseClient.ts";
+import { generateOrUpdateScript } from "../utils/anthropicUtils.ts";
 
 // Define a helper type that includes the params property
 type RouterContext = Context & {
@@ -247,194 +248,59 @@ router.post("/analyze", async (ctx: Context) => {
             text: prompt
         });
         console.log("contentArray ", contentArray);
-        // Format the request for Anthropic API
-        const anthropicRequest = {
-            max_tokens: 64000,
-            model: MODEL,
-            system: "You are an expert in analyzing workflows from screenshots and converting them into structured automation scripts. You MUST always output valid JSON that follows the exact structure provided in the prompt. Never include markdown formatting, explanations, or text outside of the JSON structure.",
-            messages: [
-                {
-                    role: "user",
-                    content: contentArray
-                }
-            ]
-        };
-        console.log("body ", anthropicRequest);
-        // Call the Anthropic API
-        let response = await fetch(ANTHROPIC_API_URL, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "x-api-key": apiKey,
-                "anthropic-version": "2023-06-01"
-            },
-            body: JSON.stringify(anthropicRequest)
-        });
 
-        if (!response.ok) {
-            const errorData = await response.json();
-            console.error("Anthropic API error:", errorData);
-            ctx.response.status = response.status;
+        // Use our utility function to generate the script
+        try {
+            const scriptResult = await generateOrUpdateScript(apiKey, contentArray);
+
+            // Extract the results
+            const { scriptContent, isValidJson, structuredContent } = scriptResult;
+
+            // Log the validation result
+            if (isValidJson) {
+                console.log("Successfully validated JSON structure");
+            } else {
+                console.warn("Failed to get valid JSON structure after retries");
+            }
+
+            // Create a new script record in the database
+            const { data: scriptData, error: scriptError } = await supabase
+                .from('scripts')
+                .insert([{
+                    session_id,
+                    content: scriptContent,
+                    status: 'completed',
+                    is_structured: isValidJson,
+                    structured_data: isValidJson ? structuredContent : null
+                }])
+                .select()
+                .single();
+
+            if (scriptError) {
+                console.error("Failed to save script:", scriptError);
+                ctx.response.status = 500;
+                ctx.response.body = {
+                    error: "Failed to save generated script",
+                    message: scriptError.message
+                };
+                return;
+            }
+            console.log("scriptData ", scriptData);
+            // Return the script data and analysis to the client
             ctx.response.body = {
-                error: "Failed to analyze images with Anthropic API",
-                details: errorData
-            };
-            return;
-        }
-
-        let result = await response.json();
-
-        // Extract the script content from the result
-        let scriptContent = result.content[0].text;
-
-        // Validate JSON structure of the response
-        let structuredContent;
-        let isValidJson = true;
-        let retryCount = 0;
-        const MAX_RETRIES = 1; // Limit retries to avoid excessive API calls
-
-        // Function to validate JSON structure
-        const validateJsonStructure = (content: string) => {
-            try {
-                // Try direct parsing
-                let parsedJson = JSON.parse(content);
-
-                // Validate required structure
-                if (!parsedJson.metadata || !parsedJson.steps || !Array.isArray(parsedJson.steps)) {
-                    return null;
-                }
-                return parsedJson;
-            } catch (directError) {
-                // Try extracting JSON with regex
-                try {
-                    const jsonMatch = content.match(/\{[\s\S]*\}/);
-                    if (jsonMatch) {
-                        let extractedJson = JSON.parse(jsonMatch[0]);
-
-                        // Validate required structure
-                        if (!extractedJson.metadata || !extractedJson.steps || !Array.isArray(extractedJson.steps)) {
-                            return null;
-                        }
-                        return extractedJson;
-                    }
-                } catch (extractError) {
-                    return null;
-                }
-            }
-            return null;
-        };
-
-        // Initially try to validate
-        structuredContent = validateJsonStructure(scriptContent);
-        isValidJson = structuredContent !== null;
-
-        // If validation fails, retry with a more explicit prompt
-        while (!isValidJson && retryCount < MAX_RETRIES) {
-            console.log(`Retry attempt ${retryCount + 1}: Invalid JSON structure detected, retrying with more explicit instructions`);
-
-            // Create a retry prompt with the original response
-            const retryContentArray = [
-                {
-                    type: "text",
-                    text: `Your previous response was not in the required JSON format. Here is what you provided:\n\n${scriptContent}\n\nPlease reformat this into a valid JSON object following EXACTLY this structure:\n\n{
-  "metadata": {
-    "title": "Brief descriptive title of workflow",
-    "url": "Starting URL of the workflow",
-    "totalSteps": number
-  },
-  "steps": [
-    {
-      "stepNumber": 1,
-      "action": "Detailed description of action (click, type, select)",
-      "target": "Precise description of what element is being targeted",
-      "value": "Any entered value or selection made (if applicable)",
-      "url": "Current page URL for this step",
-      "expectedResult": "What should happen after this action"
-    },
-    ...
-  ],
-  "summary": "Brief overview of what this automation accomplishes"
-}\n\nDo not include any text or explanations outside the JSON structure. Your entire response should be valid JSON that can be parsed with JSON.parse().`
-                }
-            ];
-
-            // Create a retry request
-            const retryRequest = {
-                max_tokens: 64000,
-                model: MODEL,
-                system: "You are an expert in converting information into properly structured JSON. Given the previous attempt that failed validation, reformat it into valid JSON following exactly the structure specified. Output ONLY the JSON object with no other text.",
-                messages: [
-                    {
-                        role: "user",
-                        content: retryContentArray
-                    }
-                ]
-            };
-
-            // Call API again
-            response = await fetch(ANTHROPIC_API_URL, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "x-api-key": apiKey,
-                    "anthropic-version": "2023-06-01"
-                },
-                body: JSON.stringify(retryRequest)
-            });
-
-            if (!response.ok) {
-                break; // If retry fails, use the original response
-            }
-
-            result = await response.json();
-            scriptContent = result.content[0].text;
-
-            // Validate the retry response
-            structuredContent = validateJsonStructure(scriptContent);
-            isValidJson = structuredContent !== null;
-
-            retryCount++;
-        }
-
-        // Log the validation result
-        if (isValidJson) {
-            console.log("Successfully validated JSON structure");
-        } else {
-            console.warn("Failed to get valid JSON structure after retries");
-        }
-
-        // Create a new script record in the database
-        const { data: scriptData, error: scriptError } = await supabase
-            .from('scripts')
-            .insert([{
+                recording_id,
                 session_id,
-                content: scriptContent,
-                status: 'completed',
+                model: MODEL,
+                script: scriptData,
                 is_structured: isValidJson,
-                structured_data: isValidJson ? structuredContent : null
-            }])
-            .select()
-            .single();
-
-        if (scriptError) {
-            console.error("Failed to save script:", scriptError);
-            ctx.response.status = 500;
-            ctx.response.body = {
-                error: "Failed to save generated script",
-                message: scriptError.message
+                analysis: structuredContent
             };
-            return;
+
+        } catch (err) {
+            console.error("Error in VLM analysis:", err);
+            ctx.response.status = 500;
+            ctx.response.body = { error: "Internal server error during image analysis" };
         }
-        console.log("scriptData ", scriptData);
-        // Return the script data and analysis to the client
-        ctx.response.body = {
-            recording_id,
-            session_id,
-            model: MODEL,
-            script: scriptData,
-            is_structured: isValidJson,
-            analysis: result
-        };
 
     } catch (err) {
         console.error("Error in VLM analysis:", err);
@@ -826,7 +692,7 @@ Do not include any explanations or notes outside of the JSON structure. Ensure y
             model: MODEL,
             script: scriptData,
             is_structured: isValidJson,
-            analysis: result,
+            analysis: structuredContent,
             retry_count: retryCount
         };
 
