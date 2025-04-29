@@ -1,1 +1,1 @@
-export * from './ComputerUseLoop'
+export * from './ComputerUseLoop.tsx'

@@ -3,14 +3,14 @@
 
 export type ToolCall =
   | {
-      name: "click";
-      input: {
-        selector?: string;
-        coordinates?: { x: number; y: number };
-        screenshotDimensions?: { width: number; height: number };
-        url?: string;
-      };
-    }
+    name: "click";
+    input: {
+      selector?: string;
+      coordinates?: { x: number; y: number };
+      screenshotDimensions?: { width: number; height: number };
+      url?: string;
+    };
+  }
   | { name: "navigate"; input: { url: string } };
 
 export interface LoopResponse {
@@ -201,12 +201,13 @@ async function executeTool(tabId: number, tool: ToolCall) {
 export async function samplingLoop(
   tabId: number,
   initialInstruction: string,
+  step: string,
   onIteration?: (resp: LoopResponse) => void,
   maxIterations = 10
 ): Promise<string> {
   let instruction = initialInstruction;
   let finalMessage = "";
-
+  console.log("Running sampling loop with instruction: ", initialInstruction);
   for (let i = 0; i < maxIterations; i++) {
     try {
       // Capture screenshot
@@ -215,7 +216,7 @@ export async function samplingLoop(
       console.log(`Captured screenshot for iteration ${i + 1}`);
       // Create the API request payload
       const requestPayload: ApiRequest = {
-        markdown: instruction,
+        markdown: "This is step " + step + " iteration " + i + " of the automation: " + instruction,
         screenshot,
         instruction: `Screen size: ${width}x${height}.`,
       };

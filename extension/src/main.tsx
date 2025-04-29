@@ -2,12 +2,13 @@ import React, { useState, useCallback, useEffect } from 'react'
 import ReactDOM from 'react-dom/client'
 import { AnimatePresence, motion } from 'framer-motion'
 import './main.css'
-import { EmptyView } from './components/EmptyView'
-import { RecordingView } from './components/RecordingView'
-import { AuthView } from './components/AuthView'
-import { AutoActionView } from './components/AutoActionView'
-import { ShowScriptsView } from './components/ShowScriptsView'
-import { LoadingView } from './components/LoadingView'
+import { EmptyView } from './components/EmptyView.tsx'
+import { RecordingView } from './components/RecordingView.tsx'
+import { AuthView } from './components/AuthView.tsx'
+import { AutoActionView } from './components/AutoActionView.tsx'
+import { ShowScriptsView } from './components/ShowScriptsView.tsx'
+import { ScriptDetailsView } from './components/ScriptDetailsView.tsx'
+import { LoadingView } from './components/LoadingView.tsx'
 
 // Define expected state structure from background
 interface BackgroundState {
@@ -54,8 +55,26 @@ interface Script {
   created_at: string;
 }
 
+// Define the structure for parsed script content, used in ScriptDetailsView
+interface ParsedScript {
+  metadata: { title: string; url: string; totalSteps: number };
+  steps: { stepNumber: number; action: string; target: string; value: string | null; url: string; expectedResult: string }[];
+  summary: string;
+}
+
 // Combine view states
-type ViewState = 'authenticating' | 'authRequired' | 'loading' | 'empty' | 'recording' | 'processingAction' | 'error' | 'action' | 'browseScripts';
+type ViewState =
+  | 'authenticating'
+  | 'authRequired'
+  | 'loading' // Initial loading of background state
+  | 'loadingScripts' // Loading the list of scripts
+  | 'empty'
+  | 'recording'
+  | 'processingAction' // Uploading/finalizing recording
+  | 'error'
+  | 'action' // Displaying generated script after recording
+  | 'browseScripts' // Showing the list of scripts
+  | 'scriptDetail'; // Showing details of a single script
 
 // const API_BASE_URL = "https://31ca-4-39-199-2.ngrok-free.app"; // Define your backend URL
 const API_BASE_URL = 'http://localhost:8002'; // Use local backend for development
@@ -97,6 +116,8 @@ const App: React.FC = () => {
   const [actionScript, setActionScript] = useState<string | null>(null); // State for the script content
   const [processingStep, setProcessingStep] = useState<number>(1); // Track script generation progress
   const [processingStatusText, setProcessingStatusText] = useState<string>(''); // Status text for LoadingView
+  const [scripts, setScripts] = useState<Script[]>([]); // State for all scripts
+  const [selectedScriptDetail, setSelectedScriptDetail] = useState<ParsedScript | null>(null); // Script being viewed in detail
 
   // --- Check Local Storage for Auth Details --- 
   useEffect(() => {
@@ -211,9 +232,9 @@ const App: React.FC = () => {
     }
 
     const messageListener = (message: any, sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
-      // Only process updates if we are in a post-auth state and not in the uploading state
-      // Important: don't auto-transition from uploading state, as it should be controlled by the handleDoneClick flow
-      if ((viewState === 'empty' || viewState === 'recording') && viewState !== 'processingAction') {
+      // Only process updates if we are in a post-auth state (empty or recording)
+      // Important: don't auto-transition from other states like uploading or processing
+      if (viewState === 'empty' || viewState === 'recording') {
         if (message.type === "state_update") {
           console.log("Popup received state update:", message.payload);
           const newState: BackgroundState = message.payload;
@@ -469,19 +490,102 @@ const App: React.FC = () => {
     }
   };
 
-  // TODO: Add a Logout handler that clears the cookie and resets state
-  // const handleLogout = async () => { ... chrome.cookies.remove ... setViewState('authRequired'); setCurrentUser(null); ... }
+  // Add a function to fetch scripts
+  const fetchScripts = useCallback(async () => {
+    setIsLoading(true);
+    setErrorMessage(null);
+    try {
+      // Remove Mock data for development/testing
+      /* 
+      const mockScripts: Script[] = [...]; 
+      setScripts(mockScripts);
+      */
+
+      // Use the real API call
+      const response = await fetch(`${API_BASE_URL}/api/scripts/all`, {
+        headers: {
+          'Accept': 'application/json',
+          'ngrok-skip-browser-warning': 'true'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch scripts: ${response.status}`);
+      }
+
+      const data = await response.json();
+      setScripts(data);
+      setViewState('browseScripts');
+    } catch (error) {
+      console.error("Error fetching scripts:", error);
+      setErrorMessage("Failed to load scripts");
+      setViewState('error');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [API_BASE_URL]);
+
+  // Fetch scripts when browsing scripts
+  useEffect(() => {
+    if (viewState === 'loadingScripts') {
+      fetchScripts();
+    }
+  }, [viewState, fetchScripts]);
+
+  // Navigate to script loading state
+  const handleBrowseScriptsClick = () => {
+    setViewState('loadingScripts');
+  };
+
+  // Handle clicking a script card in the list
+  const handleScriptSelect = (script: ParsedScript) => {
+    setSelectedScriptDetail(script);
+    setViewState('scriptDetail');
+  };
+
+  // Handle back navigation
+  const handleBackNavigation = () => {
+    // Simple back logic: from detail go to list, from list go to empty
+    if (viewState === 'scriptDetail') {
+      setViewState('browseScripts');
+      setSelectedScriptDetail(null);
+    } else if (viewState === 'browseScripts') {
+      setViewState('empty');
+    } else {
+      // Default back action if needed, e.g., from error state
+      setViewState('empty');
+    }
+  };
+
+  // Check if back button should be shown
+  const showBackButton = ['browseScripts', 'scriptDetail', 'action', 'error'].includes(viewState);
+
+  // Determine if the body should be centered
+  const isBodyCentered = !['browseScripts', 'scriptDetail', 'action', 'recording', 'processingAction'].includes(viewState);
+
+  // Function to handle script runs - add this where it makes sense in the component
+  const handleScriptRun = (script: ParsedScript, context?: string) => {
+    console.log("Script run from main component:", script.metadata.title, context);
+    // Here you could add analytics, history tracking, etc.
+  };
 
   return (
     <div className="app">
       <header className="app__header">
-        🚜 Automate Boring Stuff
-        {/* Show loading state */}
-        {isLoading && <span style={{ marginLeft: '10px', fontStyle: 'italic' }}>(Uploading...)</span>}
-        {/* Display error message if any (could be styled better) */}
-        {errorMessage && <p style={{ color: 'orange', fontSize: '0.8em', margin: '0 5px' }}>{errorMessage}</p>}
+        {showBackButton && (
+          <button onClick={handleBackNavigation} className="icon-button back-button" title="Back">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
+          </button>
+        )}
+        <span className="app-title-text">🚜 Automate Boring Stuff</span>
+        {isLoading && <span className="loading-indicator">(Loading...)</span>}
+        {errorMessage && !showBackButton && <span className="error-indicator">Error!</span>} {/* Show simple error indicator */}
       </header>
-      <div className="app__body">
+      <div className={`app__body ${isBodyCentered ? 'app__body--centered' : ''}`}>
+        {/* Display full error message only in the error state body */}
+        {viewState !== 'error' && errorMessage && showBackButton && (
+          <p className="error-message-inline">Error: {errorMessage}</p>
+        )}
         <AnimatePresence mode="wait">
           {viewState === 'authenticating' && (
             <motion.div key="authenticating" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} style={{ textAlign: 'center' }}>
@@ -500,6 +604,9 @@ const App: React.FC = () => {
               Loading recording state...
             </motion.div>
           )}
+          {viewState === 'loadingScripts' && (
+            <LoadingView key="loading-scripts" statusText="Loading scripts..." />
+          )}
           {viewState === 'processingAction' && (
             <LoadingView
               key="processing"
@@ -510,7 +617,7 @@ const App: React.FC = () => {
             <EmptyView
               key="empty"
               onRecordClick={handleRecordClick}
-              onBrowseScriptsClick={() => setViewState('browseScripts')}
+              onBrowseScriptsClick={handleBrowseScriptsClick}
               disabled={isLoading} // Disable buttons during loading
             />
           )}
@@ -520,25 +627,41 @@ const App: React.FC = () => {
               screenshots={screenshots}
               onCancelClick={handleCancelClick}
               onDoneClick={handleDoneClick}
-              disabled={isLoading} // Disable buttons during upload
             />
           )}
           {viewState === 'action' && actionScript && ( // Only render if script exists
-            <AutoActionView
-              key="action"
-              markdown={actionScript} // Pass the script content
-              onShowAllScripts={() => setViewState('browseScripts')}
+            <ScriptDetailsView
+              key="action-detail"
+              // Attempt to parse the actionScript as ParsedScript
+              script={(() => { try { return JSON.parse(actionScript); } catch { return null; } })() || {
+                // Fallback if parsing fails or actionScript is not valid JSON
+                metadata: { title: "Generated Action", url: "", totalSteps: 0 },
+                steps: [],
+                summary: "Generated script content below:",
+                // Add raw content display if needed
+                rawContent: actionScript
+              }}
+              onBack={handleBackNavigation}
+              onRun={handleScriptRun}
             />
           )}
           {viewState === 'browseScripts' && (
             <ShowScriptsView
               key="scripts"
-              baseUrl={API_BASE_URL}
-              onBack={() => setViewState('empty')}
-              onScriptSelect={(script) => {
-                setActionScript(script.content);
-                setViewState('action');
-              }}
+              scripts={scripts}
+              onBack={handleBackNavigation}
+              // Pass handler to navigate back to empty state for "New Script"
+              onNewScriptClick={() => setViewState('empty')}
+              // Pass the selection handler
+              onScriptSelect={handleScriptSelect}
+            />
+          )}
+          {viewState === 'scriptDetail' && selectedScriptDetail && (
+            <ScriptDetailsView
+              key="detail"
+              script={selectedScriptDetail}
+              onBack={handleBackNavigation}
+              onRun={handleScriptRun}
             />
           )}
           {viewState === 'error' && (

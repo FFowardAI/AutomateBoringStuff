@@ -73,7 +73,7 @@ router.get("/:id", async (ctx: Context) => {
 router.post("/", async (ctx: Context) => {
     try {
         const body = await ctx.request.body.json();
-        const { session_id, content, status = 'pending' } = body as Partial<Script>;
+        const { session_id, content, status = 'pending', is_structured = false, structured_data = null } = body as Partial<Script>;
 
         // Basic validation
         if (!session_id || !content) {
@@ -91,7 +91,7 @@ router.post("/", async (ctx: Context) => {
 
         const { data, error } = await supabase
             .from('scripts')
-            .insert([{ session_id, content, status }])
+            .insert([{ session_id, content, status, is_structured, structured_data }])
             .select()
             .single();
 

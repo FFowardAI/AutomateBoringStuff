@@ -57,7 +57,7 @@ router.post("/function-call", async (ctx: Context) => {
         }
 
         const body = await ctx.request.body.json();
-        const { markdown, screenshot, instruction } = body;
+        const { markdown, screenshot, screen_size } = body;
 
         // Get the API key from environment variable
         const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
@@ -94,7 +94,9 @@ router.post("/function-call", async (ctx: Context) => {
                                     "If you are calling a function, your message should be the next steps after we use call the tool. " +
                                     "Only include the fields you need: use `toolCall` if you want the client to execute a tool, " +
                                     "or `message` when the task is complete. " +
-                                    "If clicking, try to provide coordinates when possible."
+                                    "If clicking, try to provide coordinates when possible.\n" +
+                                    "This is the current screensize for reference: " + screen_size + ".\n" +
+                                    "If you are in the iteration +1, you should check the mouse position in the screenshot and adapt the coordinates accordingly."
                             },
                             {
                                 type: "image",

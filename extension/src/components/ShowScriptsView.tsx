@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { ScriptDetailsView } from './ScriptDetailsView.tsx';
 
 interface Script {
     id: string;
@@ -8,179 +9,155 @@ interface Script {
     created_at: string;
 }
 
-interface ShowScriptsViewProps {
-    onScriptSelect: (script: Script) => void;
-    onBack: () => void;
-    baseUrl: string;
+interface ScriptMetadata {
+    title: string;
+    url: string;
+    totalSteps: number;
 }
 
-export const ShowScriptsView: React.FC<ShowScriptsViewProps> = ({
-    onScriptSelect,
-    onBack,
-    baseUrl
-}) => {
-    const [scripts, setScripts] = useState<Script[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-    const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-    const [sessions, setSessions] = useState<{ id: string, context: string }[]>([]);
+interface ScriptStep {
+    stepNumber: number;
+    action: string;
+    target: string;
+    value: string | null;
+    url: string;
+    expectedResult: string;
+}
 
+interface ParsedScript {
+    metadata: { title: string; url: string; totalSteps: number };
+    steps: { stepNumber: number; action: string; target: string; value: string | null; url: string; expectedResult: string }[];
+    summary: string;
+}
+
+interface ShowScriptsViewProps {
+    onBack: () => void;
+    scripts: Script[];
+    onNewScriptClick?: () => void;
+    onScriptSelect: (script: ParsedScript) => void;
+}
+
+export const ShowScriptsView: React.FC<ShowScriptsViewProps> = ({ onBack, scripts, onNewScriptClick }) => {
+    const [selectedSession, setSelectedSession] = useState<string>("all");
+    const [availableSessions, setAvailableSessions] = useState<string[]>([]);
+    const [selectedScript, setSelectedScript] = useState<ParsedScript | null>(null);
+
+    // Generate a list of unique session IDs
     useEffect(() => {
-        const fetchSessions = async () => {
-            try {
-                const response = await fetch(`${baseUrl}/api/sessions`, {
-                    headers: {
-                        'Accept': 'application/json',
-                        'ngrok-skip-browser-warning': 'true'
-                    }
-                });
+        const sessions = [...new Set(scripts.map(script => script.session_id).filter(Boolean))];
+        setAvailableSessions(sessions);
+    }, [scripts]);
 
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch sessions: ${response.status}`);
-                }
+    // Filter scripts based on selected session
+    const filteredScripts = selectedSession === "all"
+        ? scripts
+        : scripts.filter(script => script.session_id === selectedSession);
 
-                const data = await response.json();
-                setSessions(data);
-            } catch (err) {
-                console.error("Error fetching sessions:", err);
-                setError("Failed to load sessions");
-            }
-        };
-
-        fetchSessions();
-    }, [baseUrl]);
-
-    useEffect(() => {
-        const fetchScripts = async () => {
-            setLoading(true);
-            setError(null);
-
-            try {
-                const url = selectedSessionId
-                    ? `${baseUrl}/api/scripts?session_id=${selectedSessionId}`
-                    : `${baseUrl}/api/scripts/all`;
-
-                const response = await fetch(url, {
-                    headers: {
-                        'Accept': 'application/json',
-                        'ngrok-skip-browser-warning': 'true'
-                    }
-                });
-
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch scripts: ${response.status}`);
-                }
-
-                const data = await response.json();
-                setScripts(data);
-            } catch (err) {
-                console.error("Error fetching scripts:", err);
-                setError("Failed to load scripts");
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        fetchScripts();
-    }, [baseUrl, selectedSessionId]);
-
-    const handleSessionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const id = e.target.value;
-        setSelectedSessionId(id === "all" ? null : id);
+    // Parse JSON content into a more structured format
+    const parseScriptContent = (content: string): ParsedScript | null => {
+        try {
+            return JSON.parse(content);
+        } catch (e) {
+            console.error("Failed to parse script content:", e);
+            return null;
+        }
     };
 
-    const formatDate = (dateString: string) => {
+    const formatDate = (dateString: string): string => {
         try {
             const date = new Date(dateString);
-            return date.toLocaleString();
-        } catch (err) {
+            return date.toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+                hour12: true
+            });
+        } catch (e) {
             return dateString;
         }
     };
 
-    const truncateContent = (content: string, maxLength = 100) => {
-        if (content.length <= maxLength) return content;
-        return content.substring(0, maxLength) + "...";
+    const handleCardClick = (script: Script) => {
+        const parsedContent = parseScriptContent(script.content);
+        if (parsedContent) {
+            setSelectedScript(parsedContent);
+        }
     };
 
+    const handleBackFromDetails = () => {
+        setSelectedScript(null);
+    };
+
+    // If a script is selected, show its details
+    if (selectedScript) {
+        return <ScriptDetailsView script={selectedScript} onBack={handleBackFromDetails} />;
+    }
+
     return (
-        <div style={{ padding: "1rem" }}>
-            <h4>Available Scripts</h4>
-
-            <div style={{ marginBottom: "1rem" }}>
-                <label htmlFor="session-select" style={{ marginRight: "0.5rem" }}>
-                    Filter by session:
-                </label>
-                <select
-                    id="session-select"
-                    value={selectedSessionId || "all"}
-                    onChange={handleSessionChange}
-                    style={{ padding: "0.3rem" }}
-                >
-                    <option value="all">All Sessions</option>
-                    {sessions.map(session => (
-                        <option key={session.id} value={session.id}>
-                            {session.context || `Session ${session.id.substring(0, 8)}`}
-                        </option>
-                    ))}
-                </select>
-            </div>
-
-            {loading ? (
-                <p>Loading scripts...</p>
-            ) : error ? (
-                <p style={{ color: "red" }}>Error: {error}</p>
-            ) : scripts.length === 0 ? (
-                <p>No scripts found.</p>
-            ) : (
-                <div
-                    style={{
-                        maxHeight: "300px",
-                        overflowY: "auto",
-                        border: "1px solid #eee",
-                        borderRadius: "4px",
-                        padding: "0.5rem"
-                    }}
-                >
-                    {scripts.map(script => (
-                        <div
-                            key={script.id}
-                            style={{
-                                padding: "0.5rem",
-                                marginBottom: "0.5rem",
-                                border: "1px solid #ccc",
-                                borderRadius: "4px",
-                                cursor: "pointer",
-                                backgroundColor: script.status === 'completed' ? "#f0fff0" : "#fff0f0"
-                            }}
-                            onClick={() => onScriptSelect(script)}
-                        >
-                            <div style={{ fontWeight: "bold" }}>
-                                Status: {script.status}
-                                <span style={{ float: "right", fontSize: "0.8rem" }}>
-                                    {formatDate(script.created_at)}
-                                </span>
-                            </div>
-                            <div style={{
-                                fontSize: "0.9rem",
-                                marginTop: "0.3rem",
-                                whiteSpace: "pre-wrap"
-                            }}>
-                                {truncateContent(script.content)}
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            )}
-
-            <div style={{ marginTop: "1rem" }}>
+        <div className="script-browser">
+            <div className="script-browser__controls">
                 <button
-                    className="button button--secondary"
-                    onClick={onBack}
+                    className="button button--primary script-browser__add-btn"
+                    onClick={onNewScriptClick}
+                    disabled={!onNewScriptClick}
                 >
-                    Back
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                    <span>New Script</span>
                 </button>
+                <div className="script-filter">
+                    <label htmlFor="session-filter">Session:</label>
+                    <select
+                        id="session-filter"
+                        value={selectedSession}
+                        onChange={(e) => setSelectedSession(e.target.value)}
+                        className="script-filter__select"
+                    >
+                        <option value="all">All</option>
+                        {availableSessions.map(sessionId => (
+                            <option key={sessionId} value={sessionId}>{sessionId.substring(0, 8)}...</option>
+                        ))}
+                    </select>
+                </div>
             </div>
+
+            <div className="script-list">
+                {filteredScripts.length === 0 ? (
+                    <p className="script-list__empty">No scripts found.</p>
+                ) : (
+                    filteredScripts.map(script => {
+                        const parsedContent = parseScriptContent(script.content);
+
+                        return (
+                            <div
+                                key={script.id}
+                                className="script-card script-card--clickable"
+                                onClick={() => handleCardClick(script)}
+                            >
+                                <div className="script-card__header">
+                                    <h2 className="script-card__title">
+                                        {parsedContent?.metadata?.title || "Untitled Script"}
+                                    </h2>
+                                </div>
+                                <div className="script-card__meta">
+                                    <span className="script-card__status">{script.status}</span>
+                                    <span className="script-card__date">{formatDate(script.created_at)}</span>
+                                    <span className="script-card__steps-count">
+                                        {parsedContent?.steps?.length || 0} steps
+                                    </span>
+                                </div>
+                            </div>
+                        );
+                    })
+                )}
+            </div>
+
+            <button onClick={onBack} className="button button--secondary script-browser__back">
+                Back
+            </button>
         </div>
     );
 }; 

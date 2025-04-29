@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { samplingLoop } from "../utils";
+import { samplingLoop } from "../utils/ComputerUseLoop.tsx";
 
 interface AutoActionViewProps {
   markdown: string;
@@ -90,9 +90,13 @@ export const AutoActionView: React.FC<AutoActionViewProps> = ({
       // }
 
       // —— LEGACY MARKDOWN FLOW —— 
-      const result = await samplingLoop(tab.id, markdown, console.log, 10);
-      console.log("Legacy automation done:", result);
-      setFinalMessage(result);
+      // TODO: FIX THIS HERE TOO
+      for (const [i, step] of parsedScript?.steps.entries() || []) {
+        console.log("Running step:", step);
+        const result = await samplingLoop(tab.id, markdown, i.toString(), console.log, 10);
+        console.log("Legacy automation done:", result);
+        setFinalMessage(result);
+      }
 
     } catch (e: any) {
       setError(e.message || "Unknown error");
