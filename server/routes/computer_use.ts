@@ -81,7 +81,8 @@ router.post("/function-call", async (ctx: Context) => {
             instruction,
             previousAction = "",
             stepContext = "",
-            successState = true
+            successState = true,
+            completionIndicator = false
         } = body;
 
         // Get the API key from environment variable
@@ -99,7 +100,7 @@ router.post("/function-call", async (ctx: Context) => {
             "Given the following markdown instruction:\n\n" +
             markdown +
             "\n\nAnalyze the screenshot and determine the appropriate action. " +
-            "Response with a tool call or a message depending on how many steps we have.\n\n" +
+            "When a step is COMPLETED, do not call any more tools; instead provide a message indicating success.\n\n" +
             "If you are calling a function, your message should be the next steps after we use call the tool. " +
             "Only include the fields you need: use `toolCall` if you want the client to execute a tool, " +
             "or `message` when the task is complete. " +
@@ -107,6 +108,7 @@ router.post("/function-call", async (ctx: Context) => {
             "This is the current screensize for reference: " + instruction + ".\n" +
             (previousAction ? `Previous action attempted: ${previousAction}. It ${successState ? 'succeeded' : 'failed'}.\n` : "") +
             (stepContext ? `Current context: ${stepContext}\n` : "") +
+            (completionIndicator ? "NOTE: There have been multiple successful actions in a row. If the step appears to be complete, DO NOT request any more actions - respond with a completion message instead.\n" : "") +
             "If you are in the second iteration or more of this step, you should check the mouse position in the screenshot and text and adapt the coordinates accordingly.\n\n" +
             "For text input operations, follow these steps:\n" +
             "1. First use click() to focus the input field you want to type into\n" +
@@ -115,7 +117,8 @@ router.post("/function-call", async (ctx: Context) => {
             "If a click or type action fails, try an alternative approach:\n" +
             "- For failed clicks, try different coordinates or a different selector\n" +
             "- For failed type operations, make sure an input field is properly focused first\n" +
-            "- Consider using click() on a visible search field or input box before trying type()";
+            "- Consider using click() on a visible search field or input box before trying type()\n\n" +
+            "IMPORTANT: KNOW WHEN TO STOP. When a step is complete (for example, after successfully navigating to a page, or after clicking a search button, or after typing and submitting text), respond with a completion message instead of calling more tools. Your message should confirm what was accomplished.";
 
         const response = await fetch(ANTHROPIC_API_URL, {
             method: "POST",

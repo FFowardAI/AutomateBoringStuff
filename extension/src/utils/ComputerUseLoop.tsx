@@ -20,6 +20,7 @@ export interface LoopResponse {
   newInstruction?: string;
   screenshotResponse?: boolean; // Indicates if the response was generated using a screenshot
   success?: boolean; // Indicates if the step was successfully executed
+  completion?: boolean; // Indicates if the step is completed
 }
 
 // Define the structure of requests to the API
@@ -30,6 +31,7 @@ export interface ApiRequest {
   previousAction?: string; // Information about the previous action taken
   stepContext?: string; // Context about the current step
   successState?: boolean; // Whether the previous step succeeded or failed
+  completionIndicator?: boolean; // Indicates if the step appears to be complete
 }
 
 const API_URL =
@@ -402,6 +404,8 @@ export async function samplingLoop(
   let previousAction = "";
   let successState = true; // Start with assumption of success
   let currentStep = step;
+  let completionIndicator = false; // Track if step is completed
+  let consecutiveSuccesses = 0; // Track consecutive successful actions
 
   console.log("Running sampling loop with instruction: ", initialInstruction);
 
@@ -424,7 +428,8 @@ export async function samplingLoop(
         instruction: `Screen size: ${width}x${height}.`,
         previousAction: previousAction,
         stepContext: `Step ${currentStep} of the automation: ${instruction}`,
-        successState: successState
+        successState: successState,
+        completionIndicator: completionIndicator
       };
 
       console.log("Sending API request with screenshot");
@@ -442,6 +447,17 @@ export async function samplingLoop(
       const data: LoopResponse = await resp.json();
       onIteration?.(data);
       console.log(`Received response for iteration ${i + 1}`, data);
+
+      // Check if this is a message indicating completion
+      if (data.message && !data.toolCall) {
+        console.log("Step completion message received:", data.message);
+        finalMessage = data.message;
+
+        // Signal completion through the response object
+        data.completion = true;
+        onIteration?.(data);
+        break;
+      }
 
       if (data.toolCall) {
         console.log(`Executing tool: ${data.toolCall.name}`);
@@ -466,21 +482,41 @@ export async function samplingLoop(
         // If action failed, provide this information in the next iteration
         if (!successState) {
           console.warn(`Tool execution failed: ${data.toolCall.name}`);
+          consecutiveSuccesses = 0; // Reset consecutive successes counter
+        } else {
+          // If action was successful, increment counter
+          consecutiveSuccesses++;
+
+          // Check if we've had enough consecutive successes to indicate step completion
+          if (consecutiveSuccesses >= 2) {
+            completionIndicator = true;
+          }
         }
 
         // Add success/failure to the response object for the callback
         data.success = successState;
         onIteration?.(data);
       } else {
-        // If no tool call was returned, check if we have a completion message
+        // If no tool call was returned but we have a message, this could be a completion indicator
         if (data.message) {
           finalMessage = data.message;
           break;
         }
       }
+
+      // If we've completed the necessary operations and Claude hasn't given a completion message yet,
+      // we can end after a reasonable number of successful steps
+      if (completionIndicator && i >= 3) {
+        console.log("Step appears complete based on consecutive successful actions");
+        if (!finalMessage) {
+          finalMessage = "Step completed successfully";
+        }
+        break;
+      }
     } catch (error) {
       console.error(`Error in sampling loop iteration ${i}:`, error);
       successState = false;
+      consecutiveSuccesses = 0;
       if (i === maxIterations - 1) {
         throw error; // Re-throw on last iteration
       }
