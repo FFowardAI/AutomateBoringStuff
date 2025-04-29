@@ -96,7 +96,7 @@ router.post("/function-call", async (ctx: Context) => {
                                     "or `message` when the task is complete. " +
                                     "If clicking, try to provide coordinates when possible.\n" +
                                     "This is the current screensize for reference: " + screen_size + ".\n" +
-                                    "If you are in the iteration +1, you should check the mouse position in the screenshot and adapt the coordinates accordingly."
+                                    "If you are in the second iteration or more of this step, you should check the mouse position in the screenshot and text and adapt the coordinates accordingly."
                             },
                             {
                                 type: "image",

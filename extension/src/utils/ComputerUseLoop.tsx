@@ -207,6 +207,7 @@ export async function samplingLoop(
 ): Promise<string> {
   let instruction = initialInstruction;
   let finalMessage = "";
+  let previousMousePosition = { x: 0, y: 0 };
   console.log("Running sampling loop with instruction: ", initialInstruction);
   for (let i = 0; i < maxIterations; i++) {
     try {
@@ -216,7 +217,7 @@ export async function samplingLoop(
       console.log(`Captured screenshot for iteration ${i + 1}`);
       // Create the API request payload
       const requestPayload: ApiRequest = {
-        markdown: "This is step " + step + " iteration " + i + " of the automation: " + instruction,
+        markdown: "This is step " + step + (i > 0 ? " previous mouse position: " + previousMousePosition : "") + " iteration " + i + " of the automation: " + instruction,
         screenshot,
         instruction: `Screen size: ${width}x${height}.`,
       };
@@ -238,6 +239,9 @@ export async function samplingLoop(
         console.log(`Executing tool: ${data.toolCall.name}`);
         await executeTool(tabId, data.toolCall);
         instruction = data.message || instruction;
+        if (data.toolCall.name === "click") {
+          previousMousePosition = data.toolCall.input.coordinates || { x: 0, y: 0 };
+        }
       } else {
         if (data.message) {
           finalMessage = data.message;
