@@ -623,3 +623,117 @@ html, body {
   border-top: 1px solid #e0e0e0; /* Add separator */
   background-color: #f8f9fa; /* Match header background */
 }
+
+/* Add styles for script preview UI */
+.script-preview {
+  margin-bottom: 1rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 1rem;
+  background-color: #f9f9f9;
+}
+
+.script-preview h5 {
+  margin-top: 0;
+  margin-bottom: 0.5rem;
+  font-size: 1.1rem;
+}
+
+.script-steps {
+  margin-top: 1rem;
+  max-height: 250px;
+  overflow-y: auto;
+}
+
+.script-step {
+  margin-bottom: 0.75rem;
+  padding: 0.5rem;
+  border-radius: 4px;
+  border-left: 3px solid #ccc;
+  background-color: #fff;
+}
+
+.step-running {
+  border-left-color: #007bff;
+  background-color: #f0f7ff;
+}
+
+.step-success {
+  border-left-color: #28a745;
+  background-color: #f0fff4;
+}
+
+.step-failed {
+  border-left-color: #dc3545;
+  background-color: #fff0f0;
+}
+
+.step-pending {
+  border-left-color: #6c757d;
+  background-color: #f8f9fa;
+}
+
+.step-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.step-number {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  width: 24px;
+  height: 24px;
+  background-color: #6c757d;
+  color: white;
+  border-radius: 50%;
+  font-size: 0.8rem;
+  margin-right: 0.5rem;
+}
+
+.step-running .step-number {
+  background-color: #007bff;
+}
+
+.step-success .step-number {
+  background-color: #28a745;
+}
+
+.step-failed .step-number {
+  background-color: #dc3545;
+}
+
+.step-action {
+  font-weight: bold;
+}
+
+.step-details {
+  margin-left: 32px;
+  font-size: 0.9rem;
+}
+
+.step-target {
+  margin-bottom: 0.25rem;
+}
+
+.step-value {
+  color: #0056b3;
+  font-style: italic;
+  margin-bottom: 0.25rem;
+}
+
+.step-message {
+  font-size: 0.85rem;
+  color: #6c757d;
+  margin-top: 0.25rem;
+  padding: 0.25rem;
+  background-color: rgba(0,0,0,0.05);
+  border-radius: 3px;
+}
+
+.step-iteration {
+  font-size: 0.75rem;
+  color: #007bff;
+  margin-top: 0.25rem;
+}

@@ -28,7 +28,7 @@ const tools = [
                     required: ["x", "y"]
                 }
             },
-            required: ["selector"]
+            required: ["coordinates"]
         }
     },
     {
@@ -44,6 +44,24 @@ const tools = [
             },
             required: ["url"]
         }
+    },
+    {
+        name: "type",
+        description: "Type text into the currently focused element",
+        input_schema: {
+            type: "object",
+            properties: {
+                text: {
+                    type: "string",
+                    description: "Text to type"
+                },
+                submitForm: {
+                    type: "boolean",
+                    description: "Whether to submit the form after typing (simulates pressing Enter)"
+                }
+            },
+            required: ["text"]
+        }
     }
 ];
 
@@ -57,7 +75,14 @@ router.post("/function-call", async (ctx: Context) => {
         }
 
         const body = await ctx.request.body.json();
-        const { markdown, screenshot, screen_size } = body;
+        const {
+            markdown,
+            screenshot,
+            instruction,
+            previousAction = "",
+            stepContext = "",
+            successState = true
+        } = body;
 
         // Get the API key from environment variable
         const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
@@ -66,6 +91,31 @@ router.post("/function-call", async (ctx: Context) => {
             ctx.response.body = { error: "Missing ANTHROPIC_API_KEY environment variable" };
             return;
         }
+
+        const textToType = "You control a browser via these tools:\n" +
+            "1) click(selector: string) - with optional coordinates\n" +
+            "2) navigate(url: string)\n" +
+            "3) type(text: string, submitForm?: boolean) - types text into currently focused element\n\n" +
+            "Given the following markdown instruction:\n\n" +
+            markdown +
+            "\n\nAnalyze the screenshot and determine the appropriate action. " +
+            "Response with a tool call or a message depending on how many steps we have.\n\n" +
+            "If you are calling a function, your message should be the next steps after we use call the tool. " +
+            "Only include the fields you need: use `toolCall` if you want the client to execute a tool, " +
+            "or `message` when the task is complete. " +
+            "If clicking, try to provide coordinates when possible.\n" +
+            "This is the current screensize for reference: " + instruction + ".\n" +
+            (previousAction ? `Previous action attempted: ${previousAction}. It ${successState ? 'succeeded' : 'failed'}.\n` : "") +
+            (stepContext ? `Current context: ${stepContext}\n` : "") +
+            "If you are in the second iteration or more of this step, you should check the mouse position in the screenshot and text and adapt the coordinates accordingly.\n\n" +
+            "For text input operations, follow these steps:\n" +
+            "1. First use click() to focus the input field you want to type into\n" +
+            "2. Then use type() with the text you want to enter\n" +
+            "3. Set submitForm to true if you want to submit the form after typing\n\n" +
+            "If a click or type action fails, try an alternative approach:\n" +
+            "- For failed clicks, try different coordinates or a different selector\n" +
+            "- For failed type operations, make sure an input field is properly focused first\n" +
+            "- Consider using click() on a visible search field or input box before trying type()";
 
         const response = await fetch(ANTHROPIC_API_URL, {
             method: "POST",
@@ -84,19 +134,7 @@ router.post("/function-call", async (ctx: Context) => {
                         content: [
                             {
                                 type: "text",
-                                text: "You control a browser via exactly two tools:\n" +
-                                    "1) click(selector: string) - with optional coordinates\n" +
-                                    "2) navigate(url: string)\n\n" +
-                                    "Given the following markdown instruction:\n\n" +
-                                    markdown +
-                                    "\n\nAnalyze the screenshot and determine the appropriate action. " +
-                                    "Response with a tool call or a message depending on how many steps we have.\n\n" +
-                                    "If you are calling a function, your message should be the next steps after we use call the tool. " +
-                                    "Only include the fields you need: use `toolCall` if you want the client to execute a tool, " +
-                                    "or `message` when the task is complete. " +
-                                    "If clicking, try to provide coordinates when possible.\n" +
-                                    "This is the current screensize for reference: " + screen_size + ".\n" +
-                                    "If you are in the second iteration or more of this step, you should check the mouse position in the screenshot and text and adapt the coordinates accordingly."
+                                text: textToType
                             },
                             {
                                 type: "image",
