@@ -19,23 +19,23 @@ function isRestrictedUrl(url?: string): boolean {
 
 // --- Interfaces for Parsed Script ---
 interface ScriptMetadata {
-    title: string;
-    url: string;
-    totalSteps: number;
+  title: string;
+  url: string;
+  totalSteps: number;
 }
 
 interface ScriptStep {
-    stepNumber: number;
-    action: "Navigate" | "Click" | "Type" | string; // Allow other actions
-    target: string;
-    value: string | null;
-    url?: string; // Optional URL context for the step
-    expectedResult?: string; // Optional expected result
+  stepNumber: number;
+  action: "Navigate" | "Click" | "Type" | string; // Allow other actions
+  target: string;
+  value: string | null;
+  url?: string; // Optional URL context for the step
+  expectedResult?: string; // Optional expected result
 }
 interface AutomationScript {
-    metadata: ScriptMetadata;
-    steps: ScriptStep[];
-    summary: string;
+  metadata: ScriptMetadata;
+  steps: ScriptStep[];
+  summary: string;
 }
 
 export const AutoActionView: React.FC<AutoActionViewProps> = ({

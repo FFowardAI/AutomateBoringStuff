@@ -8,13 +8,24 @@ const MODEL = "claude-3-5-sonnet-20240620";
 const tools = [
     {
         name: "click",
-        description: "Click on a DOM element",
+        description: "Click on an element",
         input_schema: {
             type: "object",
             properties: {
-                selector: {
-                    type: "string",
-                    description: "CSS selector for the element to click"
+                coordinates: {
+                    type: "object",
+                    description: "Coordinates for clicking at a specific position",
+                    properties: {
+                        x: {
+                            type: "number",
+                            description: "X coordinate"
+                        },
+                        y: {
+                            type: "number",
+                            description: "Y coordinate"
+                        }
+                    },
+                    required: ["x", "y"]
                 }
             },
             required: ["selector"]
@@ -46,7 +57,7 @@ router.post("/function-call", async (ctx: Context) => {
         }
 
         const body = await ctx.request.body.json();
-        const { markdown, domHtml } = body;
+        const { markdown, screenshot, instruction } = body;
 
         // Get the API key from environment variable
         const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
@@ -55,9 +66,6 @@ router.post("/function-call", async (ctx: Context) => {
             ctx.response.body = { error: "Missing ANTHROPIC_API_KEY environment variable" };
             return;
         }
-
-        // Truncate the DOM HTML to 1000 characters
-        const truncatedDomHtml = domHtml ? domHtml.slice(0, 2000) : "";
 
         const response = await fetch(ANTHROPIC_API_URL, {
             method: "POST",
@@ -73,18 +81,30 @@ router.post("/function-call", async (ctx: Context) => {
                 messages: [
                     {
                         role: "user",
-                        content:
-                            "You control a browser via exactly two tools:\n" +
-                            "1) click(selector: string)\n" +
-                            "2) navigate(url: string)\n\n" +
-                            "Given the following markdown instruction:\n\n" +
-                            markdown +
-                            "\n\nAnd the following DOM HTML (truncated to 1000 characters):\n\n" +
-                            truncatedDomHtml +
-                            "response with a tool call or a message depending on how many steps we have.\n\n" +
-                            "I you are calling a function, your message should be the next steps after we use call the tool" +
-                            "Only include the fields you need: use `toolCall` if you want the client to execute a tool, " +
-                            "or `message` when the task is complete."
+                        content: [
+                            {
+                                type: "text",
+                                text: "You control a browser via exactly two tools:\n" +
+                                    "1) click(selector: string) - with optional coordinates\n" +
+                                    "2) navigate(url: string)\n\n" +
+                                    "Given the following markdown instruction:\n\n" +
+                                    markdown +
+                                    "\n\nAnalyze the screenshot and determine the appropriate action. " +
+                                    "Response with a tool call or a message depending on how many steps we have.\n\n" +
+                                    "If you are calling a function, your message should be the next steps after we use call the tool. " +
+                                    "Only include the fields you need: use `toolCall` if you want the client to execute a tool, " +
+                                    "or `message` when the task is complete. " +
+                                    "If clicking, try to provide coordinates when possible."
+                            },
+                            {
+                                type: "image",
+                                source: {
+                                    type: "base64",
+                                    media_type: "image/png",
+                                    data: screenshot.replace(/^data:image\/png;base64,/, "")
+                                }
+                            }
+                        ]
                     }
                 ],
                 tools
