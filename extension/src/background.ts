@@ -163,5 +163,21 @@ chrome.runtime.onSuspend.addListener(() => {
 // Optional: Log when the extension is installed or updated
 chrome.runtime.onInstalled.addListener(() => {
   console.log("Extension installed or updated.");
-  // Perform any first-time setup here if needed
+  // Register the side panel when the extension is installed
+  if (chrome.sidePanel) {
+    chrome.sidePanel.setOptions({
+      enabled: true,
+      path: 'dist/index.html'
+    });
+  }
+});
+
+// Handle browser action click to open the side panel
+chrome.action.onClicked.addListener((tab) => {
+  if (chrome.sidePanel) {
+    // Open the side panel in the current window
+    chrome.sidePanel.open({
+      windowId: tab.windowId
+    });
+  }
 }); 
