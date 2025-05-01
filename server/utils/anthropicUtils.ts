@@ -5,7 +5,7 @@
 
 // Constants
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
-const MODEL = "claude-3-5-sonnet-20240620";
+const MODEL = "claude-3-7-sonnet-latest";
 
 // Interface for script validation
 export interface ScriptJSON {
@@ -68,6 +68,11 @@ export function validateScriptJSON(content: string): ScriptJSON | null {
  */
 export async function reformatInvalidJSON(apiKey: string, originalContent: string): Promise<string | null> {
     try {
+        if (!originalContent || originalContent.trim() === "") {
+            console.error("Cannot reformat empty content");
+            return null;
+        }
+
         // Create a retry prompt with the original response
         const retryContentArray = [
             {
@@ -119,10 +124,18 @@ export async function reformatInvalidJSON(apiKey: string, originalContent: strin
         });
 
         if (!response.ok) {
+            const errorStatus = `${response.status} ${response.statusText}`;
+            const errorBody = await response.text();
+            console.error(`Error reformatting JSON: API returned ${errorStatus}`, errorBody);
             return null;
         }
 
         const result = await response.json();
+        if (!result.content || !result.content[0] || !result.content[0].text) {
+            console.error("Invalid response format from API:", result);
+            return null;
+        }
+
         return result.content[0].text;
     } catch (error) {
         console.error("Error reformatting JSON:", error);
@@ -147,6 +160,17 @@ export async function generateOrUpdateScript(
     structuredContent: ScriptJSON | null;
 }> {
     try {
+        // Validate content array to prevent empty text blocks
+        console.log("Content array:", contentArray);
+        const validContentArray = contentArray.filter(item => {
+            // Keep non-text items or text items with non-empty content
+            return item.type !== "text" || (item.text && item.text.trim() !== "");
+        });
+
+        if (validContentArray.length === 0) {
+            throw new Error("Content array cannot be empty or contain only empty text blocks");
+        }
+
         // Format the request for Anthropic API
         const anthropicRequest = {
             max_tokens: 64000,
@@ -155,7 +179,7 @@ export async function generateOrUpdateScript(
             messages: [
                 {
                     role: "user",
-                    content: contentArray
+                    content: validContentArray
                 }
             ]
         };
@@ -172,6 +196,9 @@ export async function generateOrUpdateScript(
         });
 
         if (!response.ok) {
+            console.log("Anthropic API error:", response.status, response.statusText);
+            const errorBody = await response.text();
+            console.log("Error response body:", errorBody);
             throw new Error(`API error: ${response.status}`);
         }
 
@@ -225,6 +252,11 @@ export async function updateScriptWithContext(
     const scriptString = typeof existingScript === 'string'
         ? existingScript
         : JSON.stringify(existingScript, null, 2);
+
+    // Make sure both inputs are not empty
+    if (!scriptString.trim() || !contextPrompt.trim()) {
+        throw new Error("Script and context prompt cannot be empty");
+    }
 
     // Create content array with context and existing script
     const contentArray = [

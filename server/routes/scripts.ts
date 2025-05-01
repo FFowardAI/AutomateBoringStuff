@@ -193,6 +193,7 @@ router.delete("/:id", async (ctx: RouterContext) => {
 // POST /api/scripts/:id/update-with-context - Update a script with additional context
 router.post("/:id/update-with-context", async (ctx: RouterContext) => {
     const { id } = ctx.params;
+    console.log("Updating script with context:", id);
     if (!id) {
         ctx.response.status = 400;
         ctx.response.body = { error: "Script ID is required" };
@@ -202,6 +203,7 @@ router.post("/:id/update-with-context", async (ctx: RouterContext) => {
     try {
         // Parse the request body
         const body = await ctx.request.body.json();
+        console.log("Body:", body);
         const { context } = body;
 
         if (!context) {
@@ -209,6 +211,7 @@ router.post("/:id/update-with-context", async (ctx: RouterContext) => {
             ctx.response.body = { error: "Context is required" };
             return;
         }
+        console.log("Context:", context);
 
         // Get the existing script
         const { data: script, error: scriptError } = await supabase
@@ -216,6 +219,8 @@ router.post("/:id/update-with-context", async (ctx: RouterContext) => {
             .select('*')
             .eq('id', id)
             .single();
+
+        console.log(scriptError, script);
 
         if (scriptError || !script) {
             ctx.response.status = scriptError?.code === 'PGRST116' ? 404 : 500;
@@ -228,19 +233,20 @@ router.post("/:id/update-with-context", async (ctx: RouterContext) => {
 
         // Get API key from environment
         const apiKey = env.ANTHROPIC_API_KEY;
+        console.log("API Key:", apiKey);
         if (!apiKey) {
             ctx.response.status = 500;
             ctx.response.body = { error: "Anthropic API key not found in server configuration" };
             return;
         }
-
+        console.log("Updating script with context:", script.content, context);
         // Update the script with the new context
         const { scriptContent, isValidJson, structuredContent } = await updateScriptWithContext(
             apiKey,
             script.content,
             context
         );
-
+        console.log("Script content:", scriptContent);
         // Update the script in the database
         const updateData: Partial<Script> = {
             content: scriptContent,
@@ -248,20 +254,20 @@ router.post("/:id/update-with-context", async (ctx: RouterContext) => {
             structured_data: isValidJson ? structuredContent : null
         };
 
-        const { data: updatedScript, error: updateError } = await supabase
-            .from('scripts')
-            .update(updateData)
-            .eq('id', id)
-            .select()
-            .single();
+        // const { data: updatedScript, error: updateError } = await supabase
+        //     .from('scripts')
+        //     .update(updateData)
+        //     .eq('id', id)
+        //     .select()
+        //     .single();
 
-        if (updateError) {
-            ctx.response.status = 500;
-            ctx.response.body = { error: "Failed to update script", message: updateError.message };
-            return;
-        }
+        // if (updateError) {
+        //     ctx.response.status = 500;
+        //     ctx.response.body = { error: "Failed to update script", message: updateError.message };
+        //     return;
+        // }
 
-        ctx.response.body = updatedScript;
+        ctx.response.body = updateData.content;
     } catch (err: unknown) {
         console.error(`Error updating script ${id} with context:`, err);
         ctx.response.status = 500;
