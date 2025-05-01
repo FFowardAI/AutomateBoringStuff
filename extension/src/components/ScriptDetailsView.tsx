@@ -48,7 +48,7 @@ export const ScriptDetailsView: React.FC<ScriptDetailsViewProps> = ({ script, on
         }
         // For production, try to use the server URL from extension settings
         // or fall back to default localhost URL
-        return "https://faf7-65-112-8-50.ngrok-free.app";
+        return "https://e77e-192-54-222-210.ngrok-free.app";
     };
 
     // Handler for local edits (for now, just toggles edit mode)

@@ -21,7 +21,7 @@
   ],
   "host_permissions": [
     "http://localhost:8001/*",
-    "https://5aca-4-39-199-2.ngrok-free.app/*",
+    "https://e77e-192-54-222-210.ngrok-free.app/*",
     "<all_urls>"
   ],
   "background": {
