@@ -1,19 +1,10 @@
-import React, { useState } from 'react';
-import { samplingLoop } from "../utils/ComputerUseLoop.tsx";
+import React, { useState, useEffect, useRef } from 'react';
+import { samplingLoop, enhancedSamplingLoop, EnhancedLoopResponse, ScriptStep } from "../utils/ComputerUseLoop.tsx";
 
 interface ScriptMetadata {
     title: string;
     url: string;
     totalSteps: number;
-}
-
-interface ScriptStep {
-    stepNumber: number;
-    action: string;
-    target: string;
-    value: string | null;
-    url: string;
-    expectedResult: string;
 }
 
 interface ParsedScript {
@@ -31,14 +22,87 @@ interface ScriptDetailsViewProps {
     onRun?: (script: ParsedScript, context?: string) => void;
 }
 
+// Define types for ExecutionState
+interface ExecutionState {
+    currentStepIndex: number;
+    isRunning: boolean;
+    status: "idle" | "running" | "completed" | "failed";
+    stepsStatus: { [key: number]: "pending" | "running" | "success" | "failed" };
+    logs: LogEntry[];
+    lastError?: string;
+}
+
+interface LogEntry {
+    type: "info" | "success" | "error";
+    message: string;
+    timestamp: Date;
+}
+
 export const ScriptDetailsView: React.FC<ScriptDetailsViewProps> = ({ script, onBack, onRun }) => {
     // Local state for edits and context
     const [editableScript, setEditableScript] = useState<ParsedScript>(script);
-    const [isEditing, setIsEditing] = useState(false); // Track if the script is being edited locally
+    const [isEditing, setIsEditing] = useState(false);
     const [contextPrompt, setContextPrompt] = useState('');
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
     const [finalMessage, setFinalMessage] = useState<string>("");
+
+    // New state for dynamic execution
+    const [executionState, setExecutionState] = useState<ExecutionState>({
+        currentStepIndex: 0,
+        isRunning: false,
+        status: "idle",
+        stepsStatus: {},
+        logs: [],
+        lastError: undefined
+    });
+
+    // Create a ref to track if the component is mounted
+    const isMounted = useRef(true);
+
+    // Add refs for scrolling to active steps
+    const stepsListRef = useRef<HTMLDivElement>(null);
+    const stepRefs = useRef<{ [key: number]: HTMLDivElement | null }>({});
+
+    // Effect for auto-scrolling to the active step
+    useEffect(() => {
+        const currentStepNumber = executionState.currentStepIndex >= 0 &&
+            executionState.currentStepIndex < editableScript.steps.length ?
+            editableScript.steps[executionState.currentStepIndex]?.stepNumber : null;
+
+        if (currentStepNumber && stepRefs.current[currentStepNumber]) {
+            stepRefs.current[currentStepNumber]?.scrollIntoView({
+                behavior: 'smooth',
+                block: 'center'
+            });
+        }
+    }, [executionState.currentStepIndex, executionState.isRunning]);
+
+    // Initialize step status
+    useEffect(() => {
+        const initialStepsStatus: { [key: number]: "pending" | "running" | "success" | "failed" } = {};
+        script.steps.forEach(step => {
+            initialStepsStatus[step.stepNumber] = "pending";
+        });
+
+        setExecutionState(prev => ({
+            ...prev,
+            stepsStatus: initialStepsStatus
+        }));
+
+        // Cleanup function
+        return () => {
+            isMounted.current = false;
+        };
+    }, [script]);
+
+    // Add logger functions
+    const addLog = (type: "info" | "success" | "error", message: string) => {
+        if (!isMounted.current) return;
+
+        setExecutionState(prev => ({
+            ...prev,
+            logs: [...prev.logs, { type, message, timestamp: new Date() }]
+        }));
+    };
 
     // Get the base URL for API calls
     const getApiBaseUrl = () => {
@@ -69,11 +133,208 @@ export const ScriptDetailsView: React.FC<ScriptDetailsViewProps> = ({ script, on
         setIsEditing(false); // Exit edit mode after saving
     };
 
-    // Handler for running the script with context
+    // New function to execute script steps dynamically without recovery
+    const executeScriptSteps = async (tabId: number, script: ParsedScript, activeTab: chrome.tabs.Tab) => {
+        const steps = [...script.steps]; // Make a copy of the steps array
+        let currentStepIndex = 0;
+
+        // Track which original steps have been completed successfully
+        const completedOriginalSteps = new Set<number>();
+
+        while (currentStepIndex < steps.length && isMounted.current) {
+            const step = steps[currentStepIndex];
+
+            try {
+                // Update status to running for current step
+                setExecutionState(prev => ({
+                    ...prev,
+                    currentStepIndex,
+                    stepsStatus: {
+                        ...prev.stepsStatus,
+                        [step.stepNumber]: "running"
+                    }
+                }));
+
+                addLog("info", `Executing step ${step.stepNumber}: ${step.action} on "${step.target}"`);
+
+                // Execute step
+                const result = await enhancedSamplingLoop(
+                    tabId,
+                    step,
+                    step.stepNumber,
+                    (iterResult) => {
+                        console.log("Step iteration result:", iterResult);
+
+                        // If we get a completion indicator during iterations, mark as potentially successful
+                        if (iterResult.completion) {
+                            completedOriginalSteps.add(step.stepNumber);
+                            setExecutionState(prev => ({
+                                ...prev,
+                                stepsStatus: {
+                                    ...prev.stepsStatus,
+                                    [step.stepNumber]: "success"
+                                }
+                            }));
+                        }
+                    },
+                    10 // Max iterations
+                );
+
+                // Enhanced success detection - check both explicit success flag AND the expected result
+                const isStepSuccessful = result.success ||
+                    result.completion ||
+                    // Check if result message contains expected result or similar text
+                    (result.message &&
+                        (result.message.toLowerCase().includes('success') ||
+                            result.message.toLowerCase().includes('loaded successfully') ||
+                            result.message.toLowerCase().includes(step.expectedResult.toLowerCase().substring(0, 10))));
+
+                // Check if step succeeded
+                if (isStepSuccessful) {
+                    // Step succeeded, update status and mark as completed
+                    completedOriginalSteps.add(step.stepNumber);
+
+                    setExecutionState(prev => ({
+                        ...prev,
+                        stepsStatus: {
+                            ...prev.stepsStatus,
+                            [step.stepNumber]: "success"
+                        }
+                    }));
+
+                    addLog("success", `Step ${step.stepNumber} completed: ${result.message || "Success"}`);
+
+                    // Move to next step
+                    currentStepIndex++;
+                } else {
+                    // Step might have failed, but double-check by inspecting HTML
+                    // Sometimes steps succeed but are not properly detected
+                    const mightActuallyBeSuccessful = await checkIfStepMightBeSuccessful(
+                        result.htmlContent || "",
+                        step.expectedResult
+                    );
+
+                    if (mightActuallyBeSuccessful) {
+                        // Step likely succeeded despite the failure report
+                        completedOriginalSteps.add(step.stepNumber);
+
+                        setExecutionState(prev => ({
+                            ...prev,
+                            stepsStatus: {
+                                ...prev.stepsStatus,
+                                [step.stepNumber]: "success"
+                            }
+                        }));
+
+                        addLog("success", `Step ${step.stepNumber} appears to have succeeded based on page content`);
+                        currentStepIndex++;
+                        continue;
+                    }
+
+                    // Step failed, mark as failed and stop execution
+                    setExecutionState(prev => ({
+                        ...prev,
+                        stepsStatus: {
+                            ...prev.stepsStatus,
+                            [step.stepNumber]: "failed"
+                        },
+                        isRunning: false,
+                        status: "failed",
+                        lastError: result.detailedError || "Step failed without specific error"
+                    }));
+
+                    addLog("error", `Step ${step.stepNumber} failed: ${result.detailedError || "Unknown error"}`);
+                    return; // Exit execution on failure
+                }
+            } catch (error) {
+                console.error(`Error executing step ${step.stepNumber}:`, error);
+
+                setExecutionState(prev => ({
+                    ...prev,
+                    isRunning: false,
+                    status: "failed",
+                    lastError: error instanceof Error ? error.message : String(error)
+                }));
+
+                addLog("error", `Execution stopped due to error: ${error instanceof Error ? error.message : String(error)}`);
+                return;
+            }
+        }
+
+        // Final update to ensure all completed steps are marked as successful
+        if (completedOriginalSteps.size > 0) {
+            setExecutionState(prev => {
+                const updatedStepsStatus = { ...prev.stepsStatus };
+
+                // Update status for all completed original steps
+                completedOriginalSteps.forEach(stepNumber => {
+                    updatedStepsStatus[stepNumber] = "success";
+                });
+
+                return {
+                    ...prev,
+                    stepsStatus: updatedStepsStatus,
+                    isRunning: false,
+                    status: "completed"
+                };
+            });
+        } else {
+            // All steps completed
+            setExecutionState(prev => ({
+                ...prev,
+                isRunning: false,
+                status: "completed"
+            }));
+        }
+
+        setFinalMessage("All steps completed successfully!");
+        addLog("success", "Script execution completed successfully!");
+    };
+
+    // Helper function to check if a step might actually be successful based on HTML content
+    const checkIfStepMightBeSuccessful = async (html: string, expectedResult: string): Promise<boolean> => {
+        if (!html || !expectedResult) return false;
+
+        try {
+            // Simple heuristic: check if the expected result text appears in the HTML
+            const expectedLower = expectedResult.toLowerCase();
+            const htmlLower = html.toLowerCase();
+
+            // Split the expected result into words and check if most appear in the HTML
+            const words = expectedLower.split(/\s+/).filter(w => w.length > 3);
+            const matchingWords = words.filter(word => htmlLower.includes(word));
+
+            // If more than 70% of significant words are found, consider it potentially successful
+            return matchingWords.length >= Math.ceil(words.length * 0.7);
+        } catch (error) {
+            console.error("Error in success heuristic check:", error);
+            return false;
+        }
+    };
+
+    // Handler for running the script with context - UPDATED for dynamic execution
     const handleRunWithContext = async () => {
-        setError(null);
-        setLoading(true);
+        if (executionState.isRunning) {
+            return; // Prevent multiple runs
+        }
+
+        // Reset state for a new run
+        const initialStepsStatus: { [key: number]: "pending" | "running" | "success" | "failed" } = {};
+        editableScript.steps.forEach(step => {
+            initialStepsStatus[step.stepNumber] = "pending";
+        });
+
+        setExecutionState({
+            currentStepIndex: 0,
+            isRunning: true,
+            status: "running",
+            stepsStatus: initialStepsStatus,
+            logs: [],
+            lastError: undefined
+        });
+
         setFinalMessage("");
+        addLog("info", "Starting script execution...");
 
         try {
             // Always grab the active tab first
@@ -85,19 +346,18 @@ export const ScriptDetailsView: React.FC<ScriptDetailsViewProps> = ({ script, on
 
             let updatedScript = editableScript;
 
-            // If context is provided, update the script with the new context
+            // Handle context updates if needed (same as before)
             if (contextPrompt.trim()) {
                 try {
                     setFinalMessage("Updating script with context...");
+                    addLog("info", "Updating script with context...");
 
-                    // Access the ID using type assertion 
                     const scriptId = (script as ParsedScript & { id?: string }).id;
 
                     if (!scriptId) {
                         throw new Error("Script ID not found, cannot update with context");
                     }
 
-                    // Call the server endpoint to update the script with context
                     const response = await fetch(`${getApiBaseUrl()}/api/scripts/${scriptId}/update-with-context`, {
                         method: 'POST',
                         headers: {
@@ -113,48 +373,35 @@ export const ScriptDetailsView: React.FC<ScriptDetailsViewProps> = ({ script, on
                     }
 
                     const updatedScriptData = await response.json();
-                    // Update the script with the new content from the server
                     updatedScript = {
                         ...editableScript,
                         ...updatedScriptData
                     };
 
-                    setFinalMessage("Script updated with context successfully!");
+                    addLog("success", "Script updated with context successfully!");
                 } catch (contextError: any) {
                     console.error("Error updating script with context:", contextError);
-                    setFinalMessage(`Error updating script: ${contextError.message}. Running original version...`);
+                    addLog("error", `Error updating script: ${contextError.message}. Running original version...`);
                 }
             }
 
-            // Use the same logic as AutoActionView, but with the potentially updated script
-            let result = "";
-            console.log("Running script:", JSON.stringify(updatedScript.steps));
-            for (const [i, step] of updatedScript.steps.entries() || []) {
-                console.log("Running step:", step);
-                // Pass the instruction without context (it's already incorporated in the updated script)
-                const instruction = JSON.stringify(step);
-                console.log("Instruction:", instruction);
-                result = await samplingLoop(tab.id, instruction, i.toString(), console.log, 10);
-            }
-            console.log("Automation completed:", result);
-            setFinalMessage(result);
+            // Execute the script steps dynamically - pass the active tab
+            await executeScriptSteps(tab.id, updatedScript, tab);
 
             // If onRun prop is provided, call it with the updated script
             if (onRun) {
                 onRun(updatedScript, contextPrompt);
             }
         } catch (e: any) {
-            setError(e.message || "Unknown error");
-        } finally {
-            setLoading(false);
+            setExecutionState(prev => ({
+                ...prev,
+                isRunning: false,
+                status: "failed",
+                lastError: e.message || "Unknown error"
+            }));
+            addLog("error", `Script execution failed: ${e.message || "Unknown error"}`);
         }
     };
-
-    // Placeholder for input change handling if fields become editable
-    // const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    //     const { name, value } = e.target;
-    //     // Update nested state logic...
-    // };
 
     return (
         <div className="script-details">
@@ -206,41 +453,74 @@ export const ScriptDetailsView: React.FC<ScriptDetailsViewProps> = ({ script, on
             <div className="script-details__steps">
                 <h2 className="script-details__steps-title">Steps</h2>
 
-                <div className="script-details__steps-list">
-                    {editableScript.steps.map((step) => (
-                        <div key={step.stepNumber} className="script-details__step">
-                            <div className="script-details__step-header">
-                                <span className="script-details__step-number">{step.stepNumber}</span>
-                                <span className="script-details__step-action">{step.action}</span>
-                            </div>
+                <div className="script-details__steps-list" ref={stepsListRef}>
+                    {editableScript.steps.map((step) => {
+                        const stepStatus = executionState.stepsStatus[step.stepNumber];
+                        const isCurrentStep = executionState.currentStepIndex === editableScript.steps.indexOf(step);
 
-                            <div className="script-details__step-body">
-                                <div className="script-details__step-item">
-                                    <span className="script-details__step-label">Target:</span>
-                                    <span className="script-details__step-value">{step.target}</span>
+                        return (
+                            <div key={step.stepNumber}
+                                ref={(el: HTMLDivElement | null) => { stepRefs.current[step.stepNumber] = el; }}
+                                className={`script-details__step ${stepStatus ? `script-details__step--${stepStatus}` : ''} 
+                                           ${isCurrentStep ? 'script-details__step--current' : ''}`}>
+                                <div className="script-details__step-header">
+                                    <span className="script-details__step-number">{step.stepNumber}</span>
+                                    <span className="script-details__step-action">{step.action}</span>
+
+                                    {/* Status indicator */}
+                                    <span className="script-details__step-status">
+                                        {stepStatus === "pending" && <span>⌛</span>}
+                                        {stepStatus === "running" && <span>🔄</span>}
+                                        {stepStatus === "success" && <span>✅</span>}
+                                        {stepStatus === "failed" && <span>❌</span>}
+                                    </span>
                                 </div>
 
-                                {step.value && (
+                                <div className="script-details__step-body">
                                     <div className="script-details__step-item">
-                                        <span className="script-details__step-label">Value:</span>
-                                        <span className="script-details__step-value">{step.value}</span>
+                                        <span className="script-details__step-label">Target:</span>
+                                        <span className="script-details__step-value">{step.target}</span>
                                     </div>
-                                )}
 
-                                <div className="script-details__step-item">
-                                    <span className="script-details__step-label">URL:</span>
-                                    <span className="script-details__step-value">{step.url}</span>
-                                </div>
+                                    {step.value && (
+                                        <div className="script-details__step-item">
+                                            <span className="script-details__step-label">Value:</span>
+                                            <span className="script-details__step-value">{step.value}</span>
+                                        </div>
+                                    )}
 
-                                <div className="script-details__step-item">
-                                    <span className="script-details__step-label">Expected Result:</span>
-                                    <span className="script-details__step-value">{step.expectedResult}</span>
+                                    <div className="script-details__step-item">
+                                        <span className="script-details__step-label">URL:</span>
+                                        <span className="script-details__step-value">{step.url}</span>
+                                    </div>
+
+                                    <div className="script-details__step-item">
+                                        <span className="script-details__step-label">Expected Result:</span>
+                                        <span className="script-details__step-value">{step.expectedResult}</span>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                    ))}
+                        );
+                    })}
                 </div>
             </div>
+
+            {/* Execution logs */}
+            {executionState.logs.length > 0 && (
+                <div className="script-details__logs">
+                    <h3>Execution Logs</h3>
+                    <div className="script-details__logs-container">
+                        {executionState.logs.map((log, index) => (
+                            <div key={index} className={`script-details__log script-details__log--${log.type}`}>
+                                <span className="script-details__log-time">
+                                    {log.timestamp.toLocaleTimeString()}
+                                </span>
+                                <span className="script-details__log-message">{log.message}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {finalMessage && (
                 <div style={{ margin: "1rem 0", padding: "0.5rem", background: "#eef" }}>
@@ -248,23 +528,67 @@ export const ScriptDetailsView: React.FC<ScriptDetailsViewProps> = ({ script, on
                 </div>
             )}
 
-            {error && (
+            {executionState.lastError && (
                 <div style={{ margin: "1rem 0", padding: "0.5rem", background: "#fee" }}>
-                    <strong>Error:</strong> {error}
+                    <strong>Error:</strong> {executionState.lastError}
                 </div>
             )}
 
             <div className="script-details__actions">
-                {/* Updated Run button to use context and show loading state */}
                 <button
                     className="button button--primary"
                     onClick={handleRunWithContext}
-                    disabled={loading}
+                    disabled={executionState.isRunning}
                 >
-                    {loading ? "Running..." : "Run Script"}
+                    {executionState.isRunning ? "Running..." : "Run Script"}
                 </button>
-                <button className="button button--secondary" onClick={onBack} disabled={loading}>Back</button>
+                <button
+                    className="button button--secondary"
+                    onClick={onBack}
+                    disabled={executionState.isRunning}
+                >
+                    Back
+                </button>
             </div>
+
+            <style>
+                {`
+                .script-details__step--pending { opacity: 0.7; }
+                .script-details__step--running { border-left: 3px solid #2196F3; }
+                .script-details__step--success { border-left: 3px solid #4CAF50; }
+                .script-details__step--failed { border-left: 3px solid #F44336; }
+                .script-details__step--current { background-color: rgba(33, 150, 243, 0.1); }
+                
+                .script-details__logs {
+                    margin-top: 1rem;
+                    border: 1px solid #ddd;
+                    border-radius: 4px;
+                    max-height: 200px;
+                    overflow-y: auto;
+                }
+                
+                .script-details__logs-container {
+                    padding: 0.5rem;
+                }
+                
+                .script-details__log {
+                    margin-bottom: 4px;
+                    padding: 4px 8px;
+                    border-radius: 2px;
+                    font-family: monospace;
+                    font-size: 0.85rem;
+                }
+                
+                .script-details__log--info { background-color: #f5f5f5; }
+                .script-details__log--success { background-color: #e8f5e9; }
+                .script-details__log--error { background-color: #ffebee; }
+                
+                .script-details__log-time {
+                    color: #757575;
+                    margin-right: 8px;
+                }
+                `}
+            </style>
         </div>
     );
 }; 
