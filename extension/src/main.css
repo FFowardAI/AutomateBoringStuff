@@ -41,8 +41,57 @@ html, body {
   background-color: #fff; /* Add a subtle background */
   border-bottom: 1px solid #e0e0e0; /* Add border */
   flex-shrink: 0; /* Prevent header from shrinking */
+  display: flex; /* Use flexbox for layout */
+  align-items: center; /* Vertically center items */
+  justify-content: space-between; /* Distribute items */
+  gap: 0.5rem; /* Add space between back arrow and title */
 }
-  
+
+.back-button {
+    padding: 0;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #4e54c8; /* Match title color */
+    flex-shrink: 0; /* Prevent button from shrinking */
+    /* Define a fixed width or min-width if needed for alignment */
+    width: 28px; /* Match approx width of profile button */
+    display: flex; /* Center icon inside */
+    align-items: center;
+    justify-content: center;
+}
+
+/* Placeholder for alignment when back button is hidden */
+.header-placeholder {
+    width: 28px; /* Match back-button width */
+    height: 28px; /* Match back-button height */
+    flex-shrink: 0;
+}
+
+/* Wrapper for title to ensure it centers correctly */
+.app-title-wrapper {
+    flex-grow: 1; /* Take available space */
+    text-align: center; /* Center the text within */
+    /* Add margin to auto-center if space-between isn't enough */
+    margin: 0 auto; 
+}
+
+.app-title-text {
+    /* Removed centering/padding rules from here */
+    display: inline-block; /* Allow text to wrap naturally if needed */
+}
+
+.loading-indicator, .error-indicator {
+    font-size: 0.8rem;
+    margin-left: auto; /* Push indicators to the right */
+    color: #6c757d;
+    flex-shrink: 0;
+}
+
+.error-indicator {
+    color: #dc3545;
+}
+
 /* Body takes remaining space and scrolls */
 .app__body {
   flex: 1; /* Grow to fill available space */
@@ -254,29 +303,66 @@ html, body {
 .script-browser {
   padding: 0; /* Remove padding, handled by app__body */
   height: 100%;
-  overflow-y: auto; /* Allow internal scrolling if needed */
   display: flex;
   flex-direction: column;
 }
 
 .script-browser__controls {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.8rem; /* Reduced margin */
-  padding: 0 0.2rem; /* Slight padding for controls */
-  gap: 0.8rem;
-  flex-wrap: nowrap; /* Prevent wrapping */
+  align-items: center; /* Vertically align items */
+  justify-content: space-between; /* Push items to edges */
+  margin-bottom: 0.8rem;
+  padding: 0 0.2rem;
+  gap: 0.5rem; /* Gap for horizontal and vertical spacing */
+  flex-wrap: wrap; /* Allow items to wrap */
 }
+
+/* Style for nav buttons (Marketplace/My Scripts) */
+.script-browser__nav-btn {
+  font-size: 0.8rem;
+  padding: 0.4rem 0.8rem; /* Adjusted padding */
+  white-space: nowrap;
+  flex-shrink: 0;
+  background: transparent;
+  color: #6c757d;
+  border: 1px solid #ced4da; /* Lighter border */
+  border-radius: 6px; /* Consistent rounding */
+  margin: 0; /* Remove default button margin */
+}
+
+.script-browser__nav-btn:hover {
+  background-color: #f8f9fa;
+  border-color: #adb5bd;
+}
+
+/* Search input */
+.script-browser__search {
+  flex-grow: 1; /* Take available space */
+  padding: 0.5rem 0.8rem; /* Adjusted padding */
+  font-size: 0.85rem;
+  border: 1px solid #ced4da; /* Match button border */
+  border-radius: 6px;
+  margin: 0; /* Remove default margin */
+  /* Add a subtle transition */
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.script-browser__search:focus {
+  outline: none;
+  border-color: #80bdff;
+  box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
 
 .script-browser__add-btn {
   display: flex;
   align-items: center;
-  gap: 0.4rem; /* Reduced gap */
-  font-size: 0.8rem; /* Smaller font */
-  padding: 0.3rem 0.6rem; /* Smaller padding */
-  white-space: nowrap; /* Prevent text wrapping */
-  flex-shrink: 0; /* Don't shrink button */
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  padding: 0.4rem 0.8rem; /* Adjusted padding */
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin: 0; /* Remove default button margin */
 }
 
 .script-filter {
@@ -306,12 +392,12 @@ html, body {
 }
 
 .script-list {
-  flex-grow: 1;
-  overflow-y: auto; /* Ensure list itself can scroll if needed */
+  flex-grow: 1; /* Allow list to fill available vertical space */
+  overflow-y: auto; /* Enable vertical scrolling *on the list itself* */
   display: flex;
   flex-direction: column;
-  gap: 0.6rem; /* Reduced gap */
-  margin-bottom: 1rem;
+  gap: 0.6rem;
+  padding: 0.2rem; /* Add slight padding around the list */
 }
 
 .script-list__empty {
@@ -343,8 +429,11 @@ html, body {
 
 .script-card__header {
   padding: 0.6rem 0.8rem; /* Reduced padding */
-  /* Remove gradient background */
   border-bottom: 1px solid #e8e8e8; /* Lighter border */
+  display: flex; /* Use flexbox */
+  justify-content: space-between; /* Space between title and button */
+  align-items: center; /* Align items vertically */
+  gap: 0.5rem; /* Gap between items if needed */
 }
 
 .script-card__title {
@@ -352,19 +441,30 @@ html, body {
   margin: 0;
   color: #333;
   font-weight: 500; /* Slightly less bold */
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex-grow: 1; /* Allow title to take space */
+}
+
+/* Specific style for share button in card header */
+.script-card__share-btn {
+  flex-shrink: 0; /* Prevent button from shrinking */
+  color: #6c757d; /* Muted color */
+  padding: 2px; /* Adjust padding */
+}
+
+.script-card__share-btn:hover {
+   color: #212529;
+   background-color: #e9ecef;
 }
 
 .script-card__meta {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.4rem 0.8rem; /* Add padding */
+  display: flex; /* Use flexbox */
+  align-items: center; /* Align items vertically */
+  padding: 0.5rem 0.8rem; /* Adjusted padding */
   font-size: 0.75rem; /* Smaller font */
   color: #666;
-  background-color: #fcfdff; /* Very light background */
+  background-color: #fcfdff;
+  gap: 0.8rem; /* Slightly larger gap for better spacing */
+  flex-wrap: nowrap; /* Prevent meta items wrapping */
 }
 
 .script-card__status {
@@ -373,6 +473,9 @@ html, body {
   border-radius: 4px;
   font-weight: 500;
   text-transform: capitalize;
+  flex-shrink: 0; /* Don't allow status to shrink */
+  white-space: nowrap;
+  text-align: left; /* Explicitly align left */
 }
 
 /* Add styles for different statuses */
@@ -387,6 +490,12 @@ html, body {
 
 .script-card__date {
   font-style: normal;
+  text-align: left; /* Align date to the left */
+  flex: 1 1 auto; /* Allow date to grow and shrink, take available space */
+  white-space: nowrap;
+  overflow: hidden; /* Hide overflow if still too long */
+  text-overflow: ellipsis;
+  margin: 0 0.5rem; /* Add some horizontal margin */
 }
 
 /* Remove body and actions styles from list card */
@@ -397,12 +506,16 @@ html, body {
 
 .script-card__steps-count {
   font-weight: 500;
+  flex-shrink: 0; /* Don't allow step count to shrink */
+  white-space: nowrap;
+  text-align: right; /* Align step count text to the right */
 }
 
 .script-browser__back {
   align-self: center;
-  margin-top: auto; /* Push to bottom */
-  padding: 0.4rem 1.0rem; /* Adjust padding */
+  margin-top: 1rem; /* Use fixed margin instead */
+  flex-shrink: 0; /* Prevent shrinking */
+  padding: 0.4rem 1.0rem;
   font-size: 0.85rem;
 }
 
@@ -437,9 +550,11 @@ html, body {
   margin: 0; /* Remove default margin */
   font-weight: 600;
   flex-grow: 1; /* Allow title to take space */
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* Remove text truncation */
+  /* white-space: nowrap; */
+  /* overflow: hidden; */
+  /* text-overflow: ellipsis; */
+  word-wrap: break-word; /* Allow wrapping */
 }
 
 /* Icon Button Style */
@@ -737,3 +852,246 @@ html, body {
   color: #007bff;
   margin-top: 0.25rem;
 }
+
+.user-profile-container {
+    /* margin-left: auto; */ /* Removed, space-between handles positioning */
+    position: relative; /* For dropdown positioning */
+    flex-shrink: 0; /* Prevent shrinking */
+    width: 28px; /* Match approx width of back button */
+    height: 28px; /* Ensure consistent height */
+}
+
+.user-profile-button {
+    background: none;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    padding: 0;
+}
+
+.user-initial {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px; /* Size of the circle */
+    height: 28px;
+    border-radius: 50%;
+    background-color: #e0e0e0; /* Light grey background */
+    color: #333; /* Dark text */
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.user-profile-image {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    object-fit: cover; /* Ensures the image fills the circle properly */
+    border: 1px solid #e0e0e0; /* Optional: adds a subtle border */
+}
+
+/* Optional: styles if showing name */
+/* .user-name {
+    margin-left: 0.5rem;
+    font-size: 0.9rem;
+    color: #333;
+} */
+
+.user-menu {
+    position: absolute;
+    top: 100%; /* Position below the button */
+    right: 0;
+    margin-top: 8px; /* Space between button and menu */
+    background-color: white;
+    border-radius: 8px;
+    border: 1px solid #e0e0e0;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    z-index: 100; /* Ensure it's above other content */
+    min-width: 180px;
+    overflow: hidden; /* Ensures border-radius clips content */
+}
+
+.user-menu-header {
+    padding: 0.8rem 1rem;
+    border-bottom: 1px solid #f0f0f0;
+    font-size: 0.85rem;
+    color: #555;
+}
+
+.user-menu-header strong {
+    color: #222;
+    font-weight: 500;
+}
+
+.user-menu-list {
+    list-style: none;
+    padding: 0.5rem 0;
+    margin: 0;
+}
+
+.user-menu-item {
+    padding: 0.6rem 1rem;
+    font-size: 0.9rem;
+    color: #333;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.user-menu-item:hover {
+    background-color: #f8f9fa;
+}
+
+.user-menu-item--logout {
+    color: #dc3545; /* Red color for logout */
+}
+
+/* Auth View Styles */
+.auth-view {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem; /* Reduced padding */
+  max-width: 320px; /* Constrain width */
+  margin: 0 auto; /* Center horizontally */
+  text-align: center;
+}
+
+.auth-view h2 {
+  font-size: 1.3rem; /* Slightly smaller heading */
+  color: #333;
+  margin-bottom: 0.5rem; /* Reduced margin */
+  font-weight: 600;
+}
+
+.auth-view p {
+  font-size: 0.95rem; /* Smaller text */
+  color: #555;
+  margin-bottom: 1.5rem; /* Reduced margin */
+  line-height: 1.4;
+}
+
+.auth-view .button--primary {
+  /* Make button more balanced */
+  padding: 0.6rem 1.4rem; /* Smaller padding */
+  font-size: 0.95rem; /* Smaller font */
+  display: inline-flex;
+  align-items: center;
+  gap: 8px; /* Reduced space between icon and text */
+  border-radius: 24px; /* Ensure consistent rounding */
+  background: #ff6a88; /* Simpler background */
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(255, 105, 135, 0.3);
+}
+
+.auth-view .button--primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(255, 105, 135, 0.4);
+}
+
+.auth-view .button--primary svg {
+  width: 18px; /* Slightly smaller icon */
+  height: 18px;
+}
+
+.auth-view .error-message {
+  color: #dc3545; /* Red error text */
+  margin-top: 1rem; /* Reduced margin */
+  font-size: 0.85rem; /* Smaller font */
+}
+
+/* Marketplace User List Specific Styles */
+.marketplace-user-list .script-list { /* Reuse script-list container for users */
+  /* Styles specific to user list if needed */
+}
+
+.user-list { /* Container for user cards */
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  flex-grow: 1; /* Allow list to fill available vertical space */
+  overflow-y: auto; /* Enable vertical scrolling *on the list itself* */
+  padding: 0.2rem; /* Add slight padding around the list */
+}
+
+.user-list__empty {
+  text-align: center;
+  color: #666;
+  font-style: italic;
+  padding: 1.5rem 0;
+}
+
+.user-card {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  background-color: #fff;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.user-card--clickable {
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.user-card--clickable:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.08);
+}
+
+.user-card__header {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.user-card__image {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.user-card__name {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #333;
+  margin: 0;
+}
+
+.user-card__body {
+  padding: 0.8rem 1rem;
+  font-size: 0.85rem;
+  color: #555;
+}
+
+.user-card__focus {
+  margin: 0 0 0.5rem 0;
+  font-style: italic;
+}
+
+.user-card__skills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.skill-tag {
+  background-color: #e9ecef;
+  color: #495057;
+  padding: 0.2rem 0.5rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+/* Share button specific styles */
+/* .share-button { ... } // Remove or comment out if share button is only in details view now */
+
+/* Remove specific meta share button style */
+/* .script-card__meta .share-button { ... } */

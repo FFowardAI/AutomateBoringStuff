@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Automate Boring Stuff",
+  "name": "Atlas - Automate Boring Stuff",
   "version": "0.0.1",
   "description": "Make your life less boring",
   "action": {
@@ -17,15 +17,24 @@
     "storage",
     "desktopCapture",
     "activeTab",
-    "sidePanel"
+    "sidePanel",
+    "identity",
+    "identity.email"
   ],
   "host_permissions": [
-    "http://localhost:8001/*",
+    "http://localhost:8002/*",
     "https://e77e-192-54-222-210.ngrok-free.app/*",
     "<all_urls>"
   ],
   "background": {
     "service_worker": "dist/src/background.js"
+  },
+  "oauth2": {
+    "client_id": "352515017617-uhjp9oqfqovg77p8c5hnocdoihc330gj.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/userinfo.email",
+      "https://www.googleapis.com/auth/userinfo.profile"
+    ]
   },
   "side_panel": {
     "default_path": "dist/index.html"

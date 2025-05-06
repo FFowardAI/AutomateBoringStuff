@@ -2,168 +2,62 @@ import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 
 interface AuthViewProps {
-  onAuthSuccess: (userData: any) => void; // Callback when login/creation succeeds
+  onAuthSuccess: (userData: { name: string, email: string, id: null, profileImageUrl: string }) => void; // User data from Google
   baseUrl: string; // Pass the backend base URL
-}
-
-// Define a simple structure for the user data we handle in this component
-interface UserInput {
-  name: string;
-  email: string;
-}
-
-// Interface for the expected response from GET /api/users/:email
-interface UserResponse {
-    id: string;
-    name: string;
-    email: string;
-    // other fields...
 }
 
 const CUSTOM_HTML_ERROR_MESSAGE = "We're having difficulties connecting with the backend :( Try again in a sec";
 
 export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, baseUrl }) => {
-  // Initialize state directly to empty strings
-  const [email, setEmail] = useState('');
-  const [name, setName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Helper function to fetch user ID by email
-  const fetchUserIdByEmail = async (userEmail: string): Promise<string | null> => {
-    console.log(`Fetching user ID for email: ${userEmail}`);
-    try {
-      const response = await fetch(`${baseUrl}/api/users/${encodeURIComponent(userEmail)}`, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'ngrok-skip-browser-warning': 'true'
-        },
-      });
-      console.log(`GET /api/users/${userEmail} status: ${response.status}`);
-
-      if (!response.ok) {
-          let errorText = 'Unknown error';
-          try {
-             // Clone before reading text for error logging
-             errorText = await response.clone().text(); 
-             console.error(`Failed to fetch user by email. Status: ${response.status}, Response: ${errorText}`);
-          } catch (e) {
-             console.error(`Failed to fetch user by email. Status: ${response.status}. Could not read response text.`);
-          }
-          // Handle specific statuses if needed
-          if (response.status === 404) {
-             setError("User with this email not found.");
-          } else {
-             setError(`Server error fetching user details (Status: ${response.status})`);
-          }
-          return null;
-      }
-
-      // If response.ok, try reading the original response body as JSON
-      try {
-          const userData: UserResponse = await response.json(); // Read original response as JSON
-          console.log("Parsed user data:", userData);
-          return userData.id || null;
-      } catch (parseError) {
-          console.error("Failed to parse successful response as JSON:", parseError);
-          // Try reading as text for logging if JSON parsing fails
-          try {
-              const responseText = await response.clone().text(); // Clone again to read text
-              console.error("Response text that failed JSON parsing:", responseText);
-          } catch (e) {
-              console.error("Could not read response text after JSON parse failed.");
-          }
-          setError("Received invalid data format from server when fetching user details.");
-          return null;
-      }
-    } catch (fetchError: any) {
-      // This catches network errors (fetch itself failed)
-      console.error("Network error during fetch user ID by email call:", fetchError);
-      setError(`Network error fetching user details: ${fetchError.message}`);
-      return null; // Return null on error
-    }
-  };
-
-  const handleAuth = async (event: React.FormEvent) => {
-    event.preventDefault();
+  const handleGoogleSignIn = () => {
     setError(null);
     setIsLoading(true);
 
-    if (!email || !name) {
-      setError("Please enter both name and email.");
-      setIsLoading(false);
-      return;
-    }
-
-    const userDetails: UserInput = { name, email };
-    let userId: string | null = null;
-    let finalUserData: any = { ...userDetails, id: null };
-
-    try {
-      const response = await fetch(`${baseUrl}/api/users`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'ngrok-skip-browser-warning': 'true'
-        },
-        body: JSON.stringify(userDetails),
-      });
-
-      const contentType = response.headers.get('content-type');
-      if (contentType && !contentType.includes('application/json')) {
-        try {
-            const textResponse = await response.text();
-            if (textResponse.trim().toLowerCase().startsWith('<!doctype html')) {
-                throw new Error(CUSTOM_HTML_ERROR_MESSAGE);
-            }
-             throw new Error(textResponse || `Unexpected content type: ${contentType}`);
-        } catch (textError) {
-             throw new Error(`Unexpected response format received from server.`);
+    // First clear any existing token to force re-authentication
+    chrome.identity.clearAllCachedAuthTokens(() => {
+      // Then get a new token with interactive mode
+      chrome.identity.getAuthToken({ interactive: true }, (token) => {
+        if (chrome.runtime.lastError || !token) {
+          setError(chrome.runtime.lastError?.message || "Failed to get Google auth token.");
+          setIsLoading(false);
+          return;
         }
-      }
-
-      const data = await response.json();
-
-      if (response.ok) { 
-          console.log('User created successfully:', data);
-          userId = data?.id; 
-          finalUserData = data; 
-      } else if (response.status === 409) { 
-          console.log('User already exists (409 Conflict). Fetching user ID...');
-          userId = await fetchUserIdByEmail(email);
-          console.log('Fetched user ID:', userId);
-          finalUserData = { ...userDetails, id: userId };
-      } else { 
-          const errorMessage = data?.message || `Error: ${response.status} ${response.statusText}`;
-          throw new Error(errorMessage);
-      }
-
-      if (!userId) {
-          console.warn("Could not determine User ID after auth attempt. ID will not be stored.");
-      }
-
-      try {
-        const storageData = { 
-            userName: name, 
-            userEmail: email, 
-            userId: userId // Store the determined ID (or null if not found)
-        };
-        await chrome.storage.local.set(storageData);
-        console.log("User details (including ID) saved to local storage:", storageData);
-      } catch (storageError) {
-        console.warn("Error saving user details to local storage:", storageError);
-      }
-
-      onAuthSuccess(finalUserData);
-
-    } catch (err: any) {
-      console.error("Authentication error:", err);
-      setError(err.message === CUSTOM_HTML_ERROR_MESSAGE ? CUSTOM_HTML_ERROR_MESSAGE : (err.message || "An unexpected error occurred."));
-    } finally {
-      setIsLoading(false);
-    }
+        // Use the token to get user info
+        fetch('https://www.googleapis.com/oauth2/v1/userinfo?alt=json', {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+          .then(response => {
+            if (!response.ok) {
+              throw new Error(`Google API error: ${response.status}`);
+            }
+            return response.json();
+          })
+          .then(userInfo => {
+            if (userInfo && userInfo.email) {
+              console.log("Google user info:", userInfo);
+              // Pass necessary info (name, email) to the parent
+              // The DB ID will be determined in the parent component
+              onAuthSuccess({
+                name: userInfo.name || userInfo.email, // Use email as fallback name
+                email: userInfo.email,
+                id: null, // DB ID is null for now
+                profileImageUrl: userInfo.picture // Add the profile image URL
+              });
+            } else {
+              throw new Error("Failed to retrieve valid user info from Google.");
+            }
+          })
+          .catch(err => {
+            setError(err.message || "Error fetching Google user info.");
+            setIsLoading(false);
+            // Optional: Revoke token if fetching user info failed?
+            // chrome.identity.removeCachedAuthToken({ token: token }, () => {});
+          });
+      });
+    });
   };
 
   return (
@@ -173,32 +67,24 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, baseUrl }) =>
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       className="auth-view"
-      style={{ padding: '20px', textAlign: 'center' }}
     >
-      <h2>Login / Sign Up</h2>
-      <p>Enter your name and email to continue.</p>
-      <form onSubmit={handleAuth} style={{ display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'center' }}>
-        <input
-          type="text"
-          placeholder="Your Name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          disabled={isLoading}
-          style={{ padding: '8px', width: '200px' }}
-        />
-        <input
-          type="email"
-          placeholder="Your Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          disabled={isLoading}
-          style={{ padding: '8px', width: '200px' }}
-        />
-        <button type="submit" className="button button--primary" disabled={isLoading}>
-          {isLoading ? 'Processing...' : 'Continue'}
-        </button>
-        {error && <p style={{ color: 'red', marginTop: '10px' }}>{error}</p>}
-      </form>
+      <h2>Sign In</h2>
+      <p>Please sign in with your Google account to continue.</p>
+      <button
+        onClick={handleGoogleSignIn}
+        className="button button--primary"
+        disabled={isLoading}
+      >
+        {/* Improved Google logo SVG */}
+        <svg width="18" height="18" viewBox="0 0 18 18">
+          <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z" />
+          <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" />
+          <path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" />
+          <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" />
+        </svg>
+        {isLoading ? 'Signing In...' : 'Sign in with Google'}
+      </button>
+      {error && <p className="error-message">{error}</p>}
     </motion.div>
   );
 }; 

@@ -6,9 +6,9 @@ interface LoadingViewProps {
 }
 
 const piledrivers = [
-  "🚜", 
-  "🚜 🚜", 
-  "🚜 🚜 🚜", 
+  "🚜",
+  "🚜 🚜",
+  "🚜 🚜 🚜",
 ];
 
 export const LoadingView: React.FC<LoadingViewProps> = ({ statusText }) => {
@@ -36,14 +36,15 @@ export const LoadingView: React.FC<LoadingViewProps> = ({ statusText }) => {
         justifyContent: 'center',
         padding: '20px',
         textAlign: 'center',
-        minHeight: '150px', // Ensure space for animation
+        height: '100%', // Make it take full height of its container
+        flex: 1 // Ensure it grows to fill flex space
       }}
     >
       <p style={{ marginBottom: '20px' }}>{statusText}</p>
       {/* Removed animation from the emoji display div for direct transition */}
       <div style={{ fontSize: '2rem', minHeight: '3em' /* Prevent layout shifts */ }}>
         {/* Using key still helps React update, but no motion props for animation */}
-        <div key={currentFrame}> 
+        <div key={currentFrame}>
           {piledrivers[currentFrame]}
         </div>
       </div>

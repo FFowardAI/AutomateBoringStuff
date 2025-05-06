@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { samplingLoop, enhancedSamplingLoop, EnhancedLoopResponse, ScriptStep } from "../utils/ComputerUseLoop.tsx";
+import { ShareIcon } from './icons/ShareIcon.tsx'; // Import the icon
 
 interface ScriptMetadata {
     title: string;
@@ -8,7 +9,7 @@ interface ScriptMetadata {
 }
 
 interface ParsedScript {
-    id?: string;
+    id?: number;
     metadata: ScriptMetadata;
     steps: ScriptStep[];
     summary: string;
@@ -44,6 +45,7 @@ export const ScriptDetailsView: React.FC<ScriptDetailsViewProps> = ({ script, on
     const [isEditing, setIsEditing] = useState(false);
     const [contextPrompt, setContextPrompt] = useState('');
     const [finalMessage, setFinalMessage] = useState<string>("");
+    const [isShareCopied, setIsShareCopied] = useState(false); // State for share copy feedback
 
     // New state for dynamic execution
     const [executionState, setExecutionState] = useState<ExecutionState>({
@@ -131,6 +133,19 @@ export const ScriptDetailsView: React.FC<ScriptDetailsViewProps> = ({ script, on
         console.log("Saving to DB (not implemented):", editableScript);
         // Call onSave prop when implemented
         setIsEditing(false); // Exit edit mode after saving
+    };
+
+    const handleShareClick = () => {
+        if (!editableScript.id) return;
+        const shareUrl = `#script-${editableScript.id}`; // Placeholder URL
+        navigator.clipboard.writeText(shareUrl).then(() => {
+            console.log(`Copied link for script ${editableScript.id}: ${shareUrl}`);
+            setIsShareCopied(true);
+            setTimeout(() => setIsShareCopied(false), 1500); // Reset after 1.5s
+        }).catch(err => {
+            console.error('Failed to copy script link: ', err);
+            // Optionally show an error message to the user
+        });
     };
 
     // New function to execute script steps dynamically without recovery
@@ -352,7 +367,7 @@ export const ScriptDetailsView: React.FC<ScriptDetailsViewProps> = ({ script, on
                     setFinalMessage("Updating script with context...");
                     addLog("info", "Updating script with context...");
 
-                    const scriptId = (script as ParsedScript & { id?: string }).id;
+                    const scriptId = (script as ParsedScript & { id?: number }).id;
 
                     if (!scriptId) {
                         throw new Error("Script ID not found, cannot update with context");
@@ -414,6 +429,19 @@ export const ScriptDetailsView: React.FC<ScriptDetailsViewProps> = ({ script, on
                             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg> // Close icon
                         ) : (
                             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg> // Edit icon
+                        )}
+                    </button>
+                    {/* Share Button */}
+                    <button
+                        onClick={handleShareClick}
+                        className="icon-button share-button"
+                        title="Copy share link"
+                        disabled={!editableScript.id} // Disable if no ID
+                    >
+                        {isShareCopied ? (
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> // Checkmark
+                        ) : (
+                            <ShareIcon />
                         )}
                     </button>
                     {/* Save to DB Icon (only visible when editing) */}

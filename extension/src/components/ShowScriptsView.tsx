@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from "react";
-import { ScriptDetailsView } from './ScriptDetailsView.tsx';
+import { ShareIcon } from './icons/ShareIcon.tsx';
 
 interface Script {
-    id: string;
-    session_id: string;
+    id: number;
+    recording_id: number;
     content: string;
     status: string;
     created_at: string;
+    is_structured?: boolean;
+    structured_data?: Record<string, any> | null;
 }
 
 interface ScriptMetadata {
@@ -25,44 +27,37 @@ interface ScriptStep {
 }
 
 interface ParsedScript {
-    id?: string;
+    id?: number;
     metadata: { title: string; url: string; totalSteps: number };
     steps: { stepNumber: number; action: string; target: string; value: string | null; url: string; expectedResult: string }[];
     summary: string;
+    rawContent?: string;
 }
 
 interface ShowScriptsViewProps {
     onBack: () => void;
     scripts: Script[];
     onNewScriptClick?: () => void;
-    onScriptSelect: (script: ParsedScript) => void;
+    onScriptSelect: (script: Script) => void;
+    scriptViewMode: 'user' | 'marketplace';
+    searchQuery: string;
+    onSearchChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
+    onMarketplaceClick: () => void;
+    onShowMyScriptsClick: () => void;
 }
 
-export const ShowScriptsView: React.FC<ShowScriptsViewProps> = ({ onBack, scripts, onNewScriptClick }) => {
-    const [selectedSession, setSelectedSession] = useState<string>("all");
-    const [availableSessions, setAvailableSessions] = useState<string[]>([]);
-    const [selectedScript, setSelectedScript] = useState<ParsedScript | null>(null);
-
-    // Generate a list of unique session IDs
-    useEffect(() => {
-        const sessions = [...new Set(scripts.map(script => script.session_id).filter(Boolean))];
-        setAvailableSessions(sessions);
-    }, [scripts]);
-
-    // Filter scripts based on selected session
-    const filteredScripts = selectedSession === "all"
-        ? scripts
-        : scripts.filter(script => script.session_id === selectedSession);
-
-    // Parse JSON content into a more structured format
-    const parseScriptContent = (content: string): ParsedScript | null => {
-        try {
-            return JSON.parse(content);
-        } catch (e) {
-            console.error("Failed to parse script content:", e);
-            return null;
-        }
-    };
+export const ShowScriptsView: React.FC<ShowScriptsViewProps> = ({
+    onBack,
+    scripts,
+    onNewScriptClick,
+    onScriptSelect,
+    scriptViewMode,
+    searchQuery,
+    onSearchChange,
+    onMarketplaceClick,
+    onShowMyScriptsClick
+}) => {
+    const [copiedScriptId, setCopiedScriptId] = useState<number | null>(null);
 
     const formatDate = (dateString: string): string => {
         try {
@@ -79,28 +74,62 @@ export const ShowScriptsView: React.FC<ShowScriptsViewProps> = ({ onBack, script
         }
     };
 
+    const handleShareClick = (event: React.MouseEvent, scriptId: number) => {
+        event.stopPropagation();
+        const shareUrl = `#script-${scriptId}`;
+        navigator.clipboard.writeText(shareUrl).then(() => {
+            console.log(`Copied link for script ${scriptId}: ${shareUrl}`);
+            setCopiedScriptId(scriptId);
+            setTimeout(() => setCopiedScriptId(null), 1500);
+        }).catch(err => {
+            console.error('Failed to copy script link: ', err);
+        });
+    };
+
     const handleCardClick = (script: Script) => {
-        const parsedContent = parseScriptContent(script.content);
-        if (parsedContent) {
-            setSelectedScript({
-                ...parsedContent,
-                id: script.id
-            });
-        }
+        onScriptSelect(script);
     };
-
-    const handleBackFromDetails = () => {
-        setSelectedScript(null);
-    };
-
-    // If a script is selected, show its details
-    if (selectedScript) {
-        return <ScriptDetailsView script={selectedScript} onBack={handleBackFromDetails} />;
-    }
 
     return (
         <div className="script-browser">
             <div className="script-browser__controls">
+                {/* Show 'My Scripts' button when in marketplace view */}
+                {scriptViewMode === 'marketplace' && (
+                    <button
+                        className="button button--secondary script-browser__nav-btn"
+                        onClick={onShowMyScriptsClick}
+                    >
+                        My Scripts
+                    </button>
+                )}
+                {/* Show 'Marketplace' button only when viewing own scripts */}
+                {scriptViewMode === 'user' && (
+                    <button
+                        className="button button--secondary script-browser__nav-btn"
+                        onClick={onMarketplaceClick}
+                    >
+                        Marketplace
+                    </button>
+                )}
+                {/* Show 'Back to Marketplace' button when viewing a specific marketplace user's scripts? */}
+                {scriptViewMode === 'marketplace' && (
+                    <button
+                        className="button button--secondary script-browser__nav-btn"
+                        onClick={onMarketplaceClick}
+                    >
+                        Back to Users
+                    </button>
+                )}
+
+                {/* Search Bar - placeholder changes based on context */}
+                <input
+                    type="text"
+                    placeholder={scriptViewMode === 'user' ? "Search my scripts..." : "Search user's scripts..."}
+                    className="script-browser__search"
+                    value={searchQuery}
+                    onChange={onSearchChange}
+                />
+
                 <button
                     className="button button--primary script-browser__add-btn"
                     onClick={onNewScriptClick}
@@ -110,30 +139,22 @@ export const ShowScriptsView: React.FC<ShowScriptsViewProps> = ({ onBack, script
                         <line x1="12" y1="5" x2="12" y2="19"></line>
                         <line x1="5" y1="12" x2="19" y2="12"></line>
                     </svg>
-                    <span>New Script</span>
+                    <span>New</span>
                 </button>
-                <div className="script-filter">
-                    <label htmlFor="session-filter">Session:</label>
-                    <select
-                        id="session-filter"
-                        value={selectedSession}
-                        onChange={(e) => setSelectedSession(e.target.value)}
-                        className="script-filter__select"
-                    >
-                        <option value="all">All</option>
-                        {availableSessions.map(sessionId => (
-                            <option key={sessionId} value={sessionId}>{sessionId.substring(0, 8)}...</option>
-                        ))}
-                    </select>
-                </div>
             </div>
 
             <div className="script-list">
-                {filteredScripts.length === 0 ? (
-                    <p className="script-list__empty">No scripts found.</p>
+                {scripts.length === 0 ? (
+                    <p className="script-list__empty">{searchQuery ? 'No scripts match your search.' : (scriptViewMode === 'user' ? 'You have no scripts yet.' : 'No marketplace scripts found.')}</p>
                 ) : (
-                    filteredScripts.map(script => {
-                        const parsedContent = parseScriptContent(script.content);
+                    scripts.map(script => {
+                        let displayTitle = `Script ${script.id}`;
+                        try {
+                            const parsed = JSON.parse(script.content);
+                            if (parsed?.metadata?.title) {
+                                displayTitle = parsed.metadata.title;
+                            }
+                        } catch { /* Ignore parsing errors for title */ }
 
                         return (
                             <div
@@ -143,14 +164,32 @@ export const ShowScriptsView: React.FC<ShowScriptsViewProps> = ({ onBack, script
                             >
                                 <div className="script-card__header">
                                     <h2 className="script-card__title">
-                                        {parsedContent?.metadata?.title || "Untitled Script"}
+                                        {displayTitle}
                                     </h2>
+                                    <button
+                                        className="icon-button share-button script-card__share-btn"
+                                        title="Copy share link"
+                                        onClick={(e) => handleShareClick(e, script.id)}
+                                    >
+                                        {copiedScriptId === script.id ? (
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                        ) : (
+                                            <ShareIcon width={16} height={16} />
+                                        )}
+                                    </button>
                                 </div>
                                 <div className="script-card__meta">
-                                    <span className="script-card__status">{script.status}</span>
+                                    <span className="script-card__status">{script.status || 'Unknown'}</span>
                                     <span className="script-card__date">{formatDate(script.created_at)}</span>
                                     <span className="script-card__steps-count">
-                                        {parsedContent?.steps?.length || 0} steps
+                                        {(() => {
+                                            try {
+                                                const parsed = JSON.parse(script.content);
+                                                return `${parsed?.steps?.length || 0} steps`;
+                                            } catch {
+                                                return '? steps';
+                                            }
+                                        })()}
                                     </span>
                                 </div>
                             </div>
