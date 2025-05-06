@@ -5,13 +5,14 @@ import { generateOrUpdateScript } from "../utils/anthropicUtils.ts";
 // Define a helper type that includes the params property
 type RouterContext = Context & {
     params: {
-        [key: string]: string;
+        [key: string]: string; // IDs are now numbers but come as strings from params
     };
 };
 
 const router = new Router();
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const MODEL = "claude-3-7-sonnet-latest";
+const IMAGE_BUCKET = "session-images";
 
 // Default prompt for automating tasks based on image sequences
 const DEFAULT_AUTOMATION_PROMPT = `
@@ -156,19 +157,26 @@ router.post("/analyze", async (ctx: Context) => {
         const body = await ctx.request.body.json();
 
         // Required request parameters
-        const { recording_id, session_id, custom_prompt, use_default_prompt = true } = body;
+        // Expect recording_id (number), user_id (number)
+        const { recording_id, user_id, custom_prompt, use_default_prompt = true } = body;
 
-        if (!recording_id) {
+        if (recording_id === undefined || recording_id === null) {
             ctx.response.status = 400;
             ctx.response.body = { error: "recording_id is required" };
             return;
         }
-
-        if (!session_id) {
+        if (typeof recording_id !== 'number') {
             ctx.response.status = 400;
-            ctx.response.body = { error: "session_id is required" };
+            ctx.response.body = { error: "recording_id must be a number" };
             return;
         }
+        // user_id might be optional depending on whether VLM needs it
+        if (user_id !== undefined && typeof user_id !== 'number') {
+            ctx.response.status = 400;
+            ctx.response.body = { error: "user_id must be a number if provided" };
+            return;
+        }
+
 
         // Get the API key from environment variable
         const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
@@ -180,7 +188,7 @@ router.post("/analyze", async (ctx: Context) => {
 
         // Determine which prompt to use
         const prompt = use_default_prompt
-            ? (custom_prompt ? `${DEFAULT_AUTOMATION_PROMPT}\n\n${custom_prompt}` : DEFAULT_AUTOMATION_PROMPT)
+            ? (custom_prompt ? `${DEFAULT_AUTOMATION_PROMPT}\n\nAdditional Instructions:\n${custom_prompt}` : DEFAULT_AUTOMATION_PROMPT)
             : custom_prompt;
 
         if (!use_default_prompt && !custom_prompt) {
@@ -193,7 +201,7 @@ router.post("/analyze", async (ctx: Context) => {
         const { data: imagesData, error: imagesError } = await supabase
             .from('images')
             .select('id, file_path, sequence, captured_at')
-            .eq('recording_id', recording_id)
+            .eq('recording_id', recording_id) // Use numeric ID
             .order('sequence', { ascending: true, nullsFirst: false })
             .order('captured_at', { ascending: true });
 
@@ -206,32 +214,36 @@ router.post("/analyze", async (ctx: Context) => {
             return;
         }
 
-        // Get session context if available
-        const { data: sessionData, error: sessionError } = await supabase
-            .from('sessions')
-            .select('context')
-            .eq('id', session_id)
-            .single();
-
-        if (sessionError && sessionError.code !== 'PGRST116') {
-            console.error("Error fetching session data:", sessionError);
-            // Continue even if this fails
+        // Fetch user context if needed (optional, based on user_id)
+        let userContext = '';
+        if (user_id) {
+            const { data: userData, error: userError } = await supabase
+                .from('users')
+                .select('name, email') // Select relevant fields
+                .eq('id', user_id)
+                .single();
+            if (userError && userError.code !== 'PGRST116') {
+                console.error(`Error fetching user ${user_id} data:`, userError);
+                // Continue without user context
+            } else if (userData) {
+                userContext = ` User context: Name='${userData.name}', Email='${userData.email}'.`;
+            }
         }
+
 
         // Prepare the content array for the Anthropic API
         const contentArray = [];
 
-        // Add a text introduction including session context if available
+        // Add a text introduction
         contentArray.push({
             type: "text",
-            text: `Analyzing a sequence of ${imagesData.length} images showing a workflow. ` +
-                (sessionData?.context ? `Session context: ${sessionData.context}` : '')
+            text: `Analyzing a sequence of ${imagesData.length} images showing a workflow.${userContext}`
         });
 
         // Add each image to the content array
         for (const image of imagesData) {
-            // Get direct public URL
-            const imageUrl = `${supabaseUrl}/storage/v1/object/public/session-images/${image.file_path}`;
+            // Use direct public URL - ensure your bucket policy allows public reads
+            const imageUrl = `${supabaseUrl}/storage/v1/object/public/${IMAGE_BUCKET}/${image.file_path}`;
 
             contentArray.push({
                 type: "image",
@@ -247,7 +259,7 @@ router.post("/analyze", async (ctx: Context) => {
             type: "text",
             text: prompt
         });
-        console.log("contentArray ", contentArray);
+        console.log(`Prepared content array for VLM analysis (recording_id: ${recording_id})`);
 
         // Use our utility function to generate the script
         try {
@@ -256,28 +268,27 @@ router.post("/analyze", async (ctx: Context) => {
             // Extract the results
             const { scriptContent, isValidJson, structuredContent } = scriptResult;
 
-            // Log the validation result
             if (isValidJson) {
-                console.log("Successfully validated JSON structure");
+                console.log(`Successfully generated and validated script for recording ${recording_id}`);
             } else {
-                console.warn("Failed to get valid JSON structure after retries");
+                console.warn(`Generated script for recording ${recording_id}, but failed JSON validation after retries`);
             }
 
-            // Create a new script record in the database
+            // Create a new script record in the database, linked to recording_id
             const { data: scriptData, error: scriptError } = await supabase
                 .from('scripts')
                 .insert([{
-                    session_id,
+                    recording_id, // Link to the recording
                     content: scriptContent,
                     status: 'completed',
                     is_structured: isValidJson,
                     structured_data: isValidJson ? structuredContent : null
                 }])
-                .select()
+                .select() // Select the newly created script record
                 .single();
 
             if (scriptError) {
-                console.error("Failed to save script:", scriptError);
+                console.error(`Failed to save script for recording ${recording_id}:`, scriptError);
                 ctx.response.status = 500;
                 ctx.response.body = {
                     error: "Failed to save generated script",
@@ -285,33 +296,32 @@ router.post("/analyze", async (ctx: Context) => {
                 };
                 return;
             }
-            console.log("scriptData ", scriptData);
+            console.log(`Saved script ${scriptData.id} for recording ${recording_id}`);
+
             // Return the script data and analysis to the client
             ctx.response.body = {
                 recording_id,
-                session_id,
                 model: MODEL,
-                script: scriptData,
+                script: scriptData, // Return the full script record
                 is_structured: isValidJson,
-                analysis: structuredContent
+                analysis: structuredContent // Contains the parsed JSON if valid
             };
 
-        } catch (err) {
-            console.error("Error in VLM analysis:", err);
+        } catch (err: any) {
+            console.error(`Error during VLM generation for recording ${recording_id}:`, err);
             ctx.response.status = 500;
-            ctx.response.body = { error: "Internal server error during image analysis" };
+            ctx.response.body = { error: "Internal server error during script generation", message: err.message };
         }
 
-    } catch (err) {
-        console.error("Error in VLM analysis:", err);
+    } catch (err: any) {
+        console.error("Error preparing VLM analysis request:", err);
         ctx.response.status = 500;
-        ctx.response.body = { error: "Internal server error during image analysis" };
+        ctx.response.body = { error: "Internal server error preparing image analysis", message: err.message };
     }
 });
 
-export default router;
-
 // POST /api/vlm/structured-analyze - Analyze images with guaranteed structured output
+// Updated to use BIGINT IDs and link script to recording_id
 router.post("/structured-analyze", async (ctx: Context) => {
     try {
         if (!ctx.request.hasBody) {
@@ -321,21 +331,24 @@ router.post("/structured-analyze", async (ctx: Context) => {
         }
 
         const body = await ctx.request.body.json();
+        const { recording_id, user_id, custom_prompt } = body; // Expect numeric IDs
 
-        // Required request parameters
-        const { recording_id, session_id, custom_prompt } = body;
-
-        if (!recording_id) {
+        if (recording_id === undefined || recording_id === null) {
             ctx.response.status = 400;
             ctx.response.body = { error: "recording_id is required" };
             return;
         }
-
-        if (!session_id) {
+        if (typeof recording_id !== 'number') {
             ctx.response.status = 400;
-            ctx.response.body = { error: "session_id is required" };
+            ctx.response.body = { error: "recording_id must be a number" };
             return;
         }
+        if (user_id !== undefined && typeof user_id !== 'number') {
+            ctx.response.status = 400;
+            ctx.response.body = { error: "user_id must be a number if provided" };
+            return;
+        }
+
 
         // Get the API key from environment variable
         const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
@@ -345,7 +358,7 @@ router.post("/structured-analyze", async (ctx: Context) => {
             return;
         }
 
-        // Always use structured prompt
+        // Use structured prompt
         const structuredPrompt = `
 Analyze these screenshots of a workflow or task and create a detailed automation script in JSON format.
 For each step shown in the images (ordered chronologically):
@@ -383,7 +396,7 @@ Do not include any explanations or notes outside of the JSON structure. Ensure y
         const { data: imagesData, error: imagesError } = await supabase
             .from('images')
             .select('id, file_path, sequence, captured_at')
-            .eq('recording_id', recording_id)
+            .eq('recording_id', recording_id) // Use numeric ID
             .order('sequence', { ascending: true, nullsFirst: false })
             .order('captured_at', { ascending: true });
 
@@ -396,33 +409,31 @@ Do not include any explanations or notes outside of the JSON structure. Ensure y
             return;
         }
 
-        // Get session context if available
-        const { data: sessionData, error: sessionError } = await supabase
-            .from('sessions')
-            .select('context')
-            .eq('id', session_id)
-            .single();
-
-        if (sessionError && sessionError.code !== 'PGRST116') {
-            console.error("Error fetching session data:", sessionError);
-            // Continue even if this fails
+        // Fetch user context if needed (optional)
+        let userContext = '';
+        if (user_id) {
+            const { data: userData, error: userError } = await supabase
+                .from('users')
+                .select('name, email')
+                .eq('id', user_id)
+                .single();
+            if (userError && userError.code !== 'PGRST116') {
+                console.error(`Error fetching user ${user_id} data:`, userError);
+            } else if (userData) {
+                userContext = ` User context: Name='${userData.name}', Email='${userData.email}'.`;
+            }
         }
 
         // Prepare the content array for the Anthropic API
         const contentArray = [];
-
-        // Add a text introduction including session context if available
         contentArray.push({
             type: "text",
-            text: `Analyzing a sequence of ${imagesData.length} images showing a workflow. ` +
-                (sessionData?.context ? `Session context: ${sessionData.context}` : '')
+            text: `Analyzing a sequence of ${imagesData.length} images showing a workflow.${userContext}`
         });
 
-        // Add each image to the content array
+        // Add each image to the content array (using base64 helper)
         for (const image of imagesData) {
-            // Get direct public URL
-            const imageUrl = `${supabaseUrl}/storage/v1/object/public/session-images/${image.file_path}`;
-
+            const imageUrl = `${supabaseUrl}/storage/v1/object/public/${IMAGE_BUCKET}/${image.file_path}`;
             contentArray.push({
                 type: "image",
                 source: {
@@ -610,7 +621,7 @@ Do not include any explanations or notes outside of the JSON structure. Ensure y
             }
 
             // Look for step-like patterns
-            for (const line: string of lines) {
+            for (const line of lines) {
                 const stepMatch = line.match(/^(\d+)[.):]\s+(.*)/);
                 if (stepMatch) {
                     const num = parseInt(stepMatch[1]);
@@ -666,7 +677,7 @@ Do not include any explanations or notes outside of the JSON structure. Ensure y
         const { data: scriptData, error: scriptError } = await supabase
             .from('scripts')
             .insert([{
-                session_id,
+                recording_id, // Link to the recording
                 content: scriptContent,
                 status: 'completed',
                 is_structured: isValidJson,
@@ -676,7 +687,7 @@ Do not include any explanations or notes outside of the JSON structure. Ensure y
             .single();
 
         if (scriptError) {
-            console.error("Failed to save script:", scriptError);
+            console.error(`Failed to save script for recording ${recording_id}:`, scriptError);
             ctx.response.status = 500;
             ctx.response.body = {
                 error: "Failed to save generated script",
@@ -685,20 +696,24 @@ Do not include any explanations or notes outside of the JSON structure. Ensure y
             return;
         }
 
+        console.log(`Saved structured script ${scriptData.id} for recording ${recording_id}`);
+
         // Return the script data and analysis to the client
         ctx.response.body = {
             recording_id,
-            session_id,
             model: MODEL,
             script: scriptData,
             is_structured: isValidJson,
-            analysis: structuredContent,
-            retry_count: retryCount
+            analysis: structuredContent, // Parsed JSON if valid
+            retry_count: retryCount ?? 0 // Include retry count if available
         };
 
-    } catch (err) {
+    } catch (err: any) {
         console.error("Error in structured VLM analysis:", err);
         ctx.response.status = 500;
-        ctx.response.body = { error: "Internal server error during structured image analysis" };
+        ctx.response.body = { error: "Internal server error during structured image analysis", message: err.message };
     }
-}); 
+});
+
+
+export default router; 

@@ -1,9 +1,15 @@
 import { Router, Context, State } from "oak";
 import { supabase } from "../db/supabaseClient.ts";
 import { User } from "../db/models.ts";
-import { privateEncrypt } from "node:crypto";
 
 const router = new Router();
+
+// Define a helper type for Router Context that includes params
+type RouterContext = Context & {
+    params: {
+        [key: string]: string; // IDs are now numbers but come as strings from params
+    };
+};
 
 // GET /api/users - List all users (potentially limited or secured)
 router.get("/", async (ctx: Context) => {
@@ -19,44 +25,29 @@ router.get("/", async (ctx: Context) => {
     ctx.response.body = data;
 });
 
-router.get("/:email", async (ctx: Context) => {
+router.get("/by-email/:email", async (ctx: RouterContext) => {
     const { email } = ctx.params;
-    const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('email', email)
-        .single();
-    console.log(data);
-
-    if (error) {
-        ctx.response.status = 500;
-        ctx.response.body = { error: "Failed to fetch user", message: error.message };
-        return;
-    }
-    ctx.response.body = data;
-});
-
-// GET /api/users/:id - Get a specific user by ID
-router.get("/:id", async (ctx: Context) => {
-    const { id } = ctx.params;
-    if (!id) {
+    if (!email) {
         ctx.response.status = 400;
-        ctx.response.body = { error: "User ID is required" };
+        ctx.response.body = { error: "Email parameter is required" };
         return;
     }
 
     const { data, error } = await supabase
         .from('users')
         .select('*')
-        .eq('id', id)
-        .single(); // Use .single() if expecting one or zero results
+        .eq('email', decodeURIComponent(email))
+        .single();
+
+    console.log("Fetched user by email:", email, "Result:", data);
 
     if (error) {
-        ctx.response.status = 500;
-        if (error.code === 'PGRST116') { // Error code for no rows found
+        if (error.code === 'PGRST116') {
             ctx.response.status = 404;
             ctx.response.body = { error: "User not found" };
         } else {
+            console.error("Error fetching user by email:", error);
+            ctx.response.status = 500;
             ctx.response.body = { error: "Failed to fetch user", message: error.message };
         }
         return;
@@ -71,45 +62,98 @@ router.get("/:id", async (ctx: Context) => {
     ctx.response.body = data;
 });
 
-// POST /api/users - Create a new user (example)
-// In practice, user creation might happen via Supabase Auth or implicitly
+// GET /api/users/:id - Get a specific user by numeric ID
+router.get("/:id", async (ctx: RouterContext) => {
+    const idStr = ctx.params.id;
+    const id = parseInt(idStr);
+
+    if (isNaN(id)) {
+        ctx.response.status = 400;
+        ctx.response.body = { error: "Invalid User ID format" };
+        return;
+    }
+
+    const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+    if (error) {
+        if (error.code === 'PGRST116') {
+            ctx.response.status = 404;
+            ctx.response.body = { error: "User not found" };
+        } else {
+            console.error("Error fetching user by ID:", error);
+            ctx.response.status = 500;
+            ctx.response.body = { error: "Failed to fetch user", message: error.message };
+        }
+        return;
+    }
+
+    if (!data) {
+        ctx.response.status = 404;
+        ctx.response.body = { error: "User not found" };
+        return;
+    }
+
+    ctx.response.body = data;
+});
+
+// POST /api/users - Create a new user
 router.post("/", async (ctx: Context) => {
     try {
         const body = await ctx.request.body.json();
-        console.log(body);
-        const { name, email } = body as Partial<User>;
+        console.log("Request body for user creation:", body);
+        const {
+            name,
+            email,
+            permissions,
+            role_id,
+            organization_id
+        } = body as Partial<User>;
 
-        // Basic validation
-        if (!email) { // Assuming email is the minimum required field
+        if (!name) {
+            ctx.response.status = 400;
+            ctx.response.body = { error: "Name is required to create a user" };
+            return;
+        }
+        if (!email) {
             ctx.response.status = 400;
             ctx.response.body = { error: "Email is required to create a user" };
             return;
         }
 
+        const insertData: Partial<User> = { name, email };
+        if (permissions !== undefined) insertData.permissions = permissions;
+        if (role_id !== undefined) insertData.role_id = role_id;
+        if (organization_id !== undefined) insertData.organization_id = organization_id;
+
         const { data, error } = await supabase
             .from('users')
-            .insert([{ name, email }])
+            .insert([insertData])
             .select()
             .single();
 
         if (error) {
-            // Handle potential unique constraint violation for email
-            if (error.code === '23505') { // Unique violation code
-                ctx.response.status = 409; // Conflict
+            if (error.code === '23505' && error.message.includes('users_email_key')) {
+                ctx.response.status = 409;
                 ctx.response.body = { error: "User with this email already exists", message: error.message };
             } else {
+                console.error("Error inserting user:", error);
                 ctx.response.status = 500;
                 ctx.response.body = { error: "Failed to create user", message: error.message };
             }
             return;
         }
 
+        console.log("Successfully created user:", data);
         ctx.response.status = 201;
         ctx.response.body = data;
-    } catch (err) {
+    } catch (err: any) {
         console.error("Error creating user:", err);
         ctx.response.status = 500;
-        ctx.response.body = { error: "Internal server error during user creation" };
+        ctx.response.body = { error: "Internal server error during user creation", message: err.message };
     }
 });
 

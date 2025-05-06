@@ -11,7 +11,6 @@ const env = await config({ safe: true, export: true });
 
 // Import new routes
 import usersRoutes from "./routes/users.ts";
-import sessionsRoutes from "./routes/sessions.ts";
 import recordingsRoutes from "./routes/recordings.ts";
 import imagesRoutes from "./routes/images.ts";
 import scriptsRoutes from "./routes/scripts.ts";
@@ -86,7 +85,6 @@ router
 
 // Register API routes
 router.use("/api/users", usersRoutes.routes(), usersRoutes.allowedMethods());
-router.use("/api/sessions", sessionsRoutes.routes(), sessionsRoutes.allowedMethods());
 router.use("/api/recordings", recordingsRoutes.routes(), recordingsRoutes.allowedMethods());
 router.use("/api/images", imagesRoutes.routes(), imagesRoutes.allowedMethods());
 router.use("/api/scripts", scriptsRoutes.routes(), scriptsRoutes.allowedMethods());
